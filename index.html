@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>みつばメモ｜3つ選んで、ひとつだけ。ADHDや気分の波がある日のタスク補助</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+
+<body>
+    <div class="container">
+        <header class="app-header">
+            <button class="brand-row brand-button" id="brandHomeBtn" type="button" aria-label="使う画面に戻る">
+                <div class="brand-mark" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <div>
+                    <h1 class="title">みつばメモ</h1>
+                    <p class="subtitle">3つだけ見て、ひとつずつ進む</p>
+                </div>
+            </button>
+
+            <nav class="tabs" aria-label="画面切り替え" role="tablist">
+                <button class="tab-btn is-active" id="useTab" type="button" role="tab" data-tab="use" aria-selected="true" aria-controls="usePanel">使う</button>
+                <button class="tab-btn" id="aboutTab" type="button" role="tab" data-tab="about" aria-selected="false" aria-controls="aboutPanel">このアプリ</button>
+            </nav>
+        </header>
+
+        <main>
+            <section class="tab-panel is-active" id="usePanel" role="tabpanel" aria-labelledby="useTab">
+                <div class="grid">
+                    <section class="card task-card">
+                        <div class="section-head">
+                            <div>
+                                <h2>いまやること</h2>
+                                <p class="card-desc">今やるものを1つだけ決めましょう。</p>
+                            </div>
+                            <span class="step-count" id="nextStepCount" aria-live="polite" hidden></span>
+                        </div>
+
+                        <div class="current-work-area">
+                            <div class="current-box" id="currentBox">
+                                <div class="current-label">今はこれだけ</div>
+                                <div class="current-task" id="currentTaskText">まずは今日の候補を1つ入れてみましょう</div>
+                            </div>
+                            <div class="current-actions">
+                                <button class="btn-soft current-stop-btn" id="saveProgressBtn" type="button">いったん休む</button>
+                                <button class="btn-done current-complete-btn" id="completeCurrentTaskBtn" type="button">できた！</button>
+                            </div>
+
+                            <div class="next-step-section" id="nextStepSection">
+                                <div class="next-step-head">
+                                    <div>
+                                        <h3>次の一歩</h3>
+                                        <p class="card-desc">動き出しやすいように、すぐできる小さな作業にしましょう。</p>
+                                    </div>
+                                </div>
+
+                                <div class="next-step-view" id="nextStepView" role="button" tabindex="0" aria-label="次の一歩を編集する">
+                                    <div class="next-step-text" id="nextStepText">このタスクを始めるための、小さな一歩を書いてみましょう</div>
+                                </div>
+                                <div class="next-step-actions" id="nextStepActions">
+                                    <button class="btn-primary small" id="editNextStepBtn" type="button">次の一歩を書く</button>
+                                    <button class="btn-done small" id="completeNextStepBtn" type="button" hidden>一歩できた</button>
+                                </div>
+
+                                <div class="next-step-editor" id="nextStepEditor" hidden>
+                                    <textarea id="nextStepInput" class="short-textarea" placeholder="例：床のものを1つ拾う / 冷蔵庫を見る"></textarea>
+                                    <div class="editor-actions">
+                                        <span class="save-note" id="nextStepSaveNote">自動保存されます</span>
+                                        <button class="btn-soft small" id="closeNextStepEditorBtn" type="button">閉じる</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="candidate-section">
+                            <div class="candidate-head">
+                                <div>
+                                    <h3>今日の候補</h3>
+                                    <p class="card-desc">たくさんのタスクに囲まれすぎないように、今見るものを3つまでにしぼりましょう。</p>
+                                </div>
+                                <span class="pill task-count-pill" id="taskCountPill">候補 <span id="taskCount">0</span> / 3</span>
+                            </div>
+                            <div class="candidate-work-area">
+                                <div class="row add-task-row">
+                                    <input id="taskInput" type="text" placeholder="例：部屋を整える / 今日のごはんを考える" maxlength="80" />
+                                    <button class="btn-primary" id="addTaskBtn">追加</button>
+                                </div>
+
+                                <div class="task-list" id="taskList"></div>
+                            </div>
+                        </div>
+
+                        <div class="completed-section">
+                            <button class="completed-toggle" id="completedToggleBtn" type="button" aria-expanded="false" aria-controls="completedTaskList">
+                                <span class="accordion-label">できたこと</span>
+                                <span class="accordion-meta">
+                                    <span class="completed-count">0件</span>
+                                    <span class="accordion-arrow" aria-hidden="true">▼</span>
+                                </span>
+                            </button>
+                            <div class="task-list" id="completedTaskList" style="display: none;"></div>
+                        </div>
+
+                        <div class="footer-note">このブラウザに自動保存されます。</div>
+                    </section>
+
+                    <div class="side-column">
+                        <section class="card close-card" id="closeCard">
+                            <h2>いったん休む</h2>
+                            <p>途中で休んでも戻れるように、再開メモを残せます。</p>
+                            <div class="interruption-summary" id="interruptionSummary"></div>
+                        </section>
+
+                        <section class="card parking-card">
+                            <h2>いったん置く</h2>
+                            <p class="card-desc">今見ないタスクや作業中の思いつきは、ここに置いて忘れても大丈夫。</p>
+
+                            <textarea id="parkingInput" class="parking-input" placeholder="例：あとで選ぶタスク / 思いつき"></textarea>
+                            <button class="btn-soft full-button" id="addParkingBtn" type="button">置いておく</button>
+
+                            <div class="parking-archive">
+                                <button class="parking-toggle" id="parkingToggleBtn" type="button" aria-expanded="false" aria-controls="parkingList">
+                                    <span class="accordion-label">置いたもの</span>
+                                    <span class="accordion-meta">
+                                        <span class="parking-count">0件</span>
+                                        <span class="accordion-arrow" aria-hidden="true">▼</span>
+                                    </span>
+                                </button>
+                                <div class="parking-list" id="parkingList"></div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </section>
+
+            <section class="tab-panel" id="aboutPanel" role="tabpanel" aria-labelledby="aboutTab">
+                <section class="about-layout">
+                    <div class="about-copy">
+                        <h2>みつばメモについて</h2>
+                        <p>
+                            みつばメモは、たくさんのタスクに囲まれすぎないように、今日見るものを3つまでにしぼるための小さなメモです。
+                        </p>
+                        <div class="about-block">
+                            <h3>作った理由</h3>
+                            <p>
+                                ADHDや気分の波があると、やることを選ぶだけで疲れることがあります。
+                            </p>
+                            <p>
+                                みつばメモは、タスクを増やすためではなく、見るものを減らすために作りました。
+                                途中で止まっても、戻りやすいことを大切にしています。
+                            </p>
+                        </div>
+                        <div class="about-block">
+                            <h3>使い方</h3>
+                            <ol class="about-steps">
+                                <li>まず「今日の候補」に、気になることを1つ入れます。</li>
+                                <li>候補が増えすぎないように、今日見るものは3つまでにします。</li>
+                                <li>その中から「これをやる」を押して、「今はこれだけ」を1つ選びます。</li>
+                                <li>動き出しやすいように、「次の一歩」を小さく書きます。</li>
+                            </ol>
+                        </div>
+                        <div class="about-block">
+                            <h3>途中で止まっても大丈夫</h3>
+                            <p>
+                                今見ないタスクや作業中の思いつきは、「いったん置く」に預けておけます。
+                                ここに置いたら、忘れても大丈夫です。
+                            </p>
+                            <p>
+                                途中で休むときは「いったん休む」から再開メモを残せます。
+                                完了できない日も、どこから戻ればいいかをあとで思い出しやすくなります。
+                            </p>
+                        </div>
+                        <div class="about-block">
+                            <h3>大切なこと</h3>
+                            <p>
+                                みつばメモは、日々のタスク整理を少し助けるための小さなツールです。診断や治療、医療的な助言の代わりになるものではありません。しんどさが強いときや、ひとりで抱えるには重いと感じるときは、医療や福祉の助けを借りることも選択肢に入れてください。
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="about-links">
+                        <a class="link-card" href="https://x.com/_himecat" target="_blank" rel="noopener noreferrer" aria-label="製作者のXリンク">
+                            <span class="link-title">
+                                <span class="social-icon x-icon" aria-hidden="true">X</span>
+                                <span class="link-label">製作者のX</span>
+                            </span>
+                            <span class="link-note">感想をもらえると嬉しいです。フォローも励みになります☘</span>
+                        </a>
+                        <a class="link-card" href="https://www.instagram.com/hime_c4t/" target="_blank" rel="noopener noreferrer" aria-label="製作者のInstagramリンク">
+                            <span class="link-title">
+                                <span class="social-icon instagram-icon" aria-hidden="true"></span>
+                                <span class="link-label">Instagram</span>
+                            </span>
+                            <span class="link-note">Instagramからもゆるく連絡できます。</span>
+                        </a>
+                    </div>
+                </section>
+            </section>
+        </main>
+
+        <footer class="app-footer">
+            <p>© 2026 みつばメモ by himecat</p>
+        </footer>
+    </div>
+
+    <dialog class="modal" id="interruptionModal">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h2>いったん休む</h2>
+                <button class="icon-btn" id="cancelInterruptionBtn" type="button" aria-label="閉じる">×</button>
+            </div>
+            <p class="modal-desc">次に戻るときのために、今どこまで進んだかを書いておきます。空のままでも休めます。</p>
+            <label class="field-label" for="interruptionInput">再開メモ</label>
+            <textarea id="interruptionInput" class="short-textarea" placeholder="例：見出し2の途中 / メール文面の2段落目"></textarea>
+            <div class="modal-actions">
+                <button class="btn-soft" id="skipInterruptionBtn" type="button">書かずに休む</button>
+                <button class="btn-primary" id="completeInterruptionBtn" type="button">保存して休む</button>
+            </div>
+        </div>
+    </dialog>
+
+    <script src="js/script.js"></script>
+</body>
+
+</html>
