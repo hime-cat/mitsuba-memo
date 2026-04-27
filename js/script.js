@@ -328,6 +328,7 @@ function renderNextStep(task) {
 
   nextStepText.textContent = nextStep || EMPTY_NEXT_STEP_TEXT;
   nextStepText.classList.toggle("is-empty", !nextStep);
+  nextStepView.classList.toggle("is-empty", !nextStep);
   nextStepView.setAttribute("aria-label", nextStep ? "次の一歩を変更する" : "次の一歩を書く");
   nextStepCount.textContent = stepCount > 0 ? `${stepCount}歩進みました` : DEFAULT_NEXT_STEP_COUNT_TEXT;
   nextStepCount.hidden = !task;
@@ -626,7 +627,7 @@ function renderTasks() {
       <div class="item-bottom">
         <div class="item-actions">
           ${isCurrent ? "" : `<button class="btn-primary small" data-action="current">これをやる</button>`}
-          <button class="btn-soft small" data-action="parking">今は置く</button>
+          <button class="btn-soft small" data-action="parking">いったん置く</button>
           <button class="btn-danger small" data-action="delete">削除</button>
         </div>
         <div class="item-updated">更新 ${formatUpdatedAt(task.updatedAt || task.createdAt)}</div>
