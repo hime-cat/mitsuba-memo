@@ -1,7 +1,7 @@
 const STORAGE_KEY = "adhd_support_app_v3";
 const COMPLETED_LIMIT = 5;
 const EMPTY_CURRENT_TASK_TEXT = "まずは今日の候補を1つ入れてみましょう";
-const EMPTY_NEXT_STEP_TEXT = "このタスクを始めるための、小さな一歩を書いてみましょう";
+const SELECT_CURRENT_TASK_TEXT = "候補から「これを進める」を選びましょう";
 const DEFAULT_NEXT_STEP_COUNT_TEXT = "一歩ずつ進めましょう";
 
 const state = {
@@ -9,7 +9,6 @@ const state = {
   completedTasks: [],
   currentTaskId: null,
   parking: [],
-  showCompleted: false,
   showParking: false
 };
 
@@ -17,47 +16,52 @@ const tabButtons = document.querySelectorAll("[data-tab]");
 const brandHomeBtn = document.getElementById("brandHomeBtn");
 const usePanel = document.getElementById("usePanel");
 const aboutPanel = document.getElementById("aboutPanel");
+const inputModePanel = document.getElementById("inputModePanel");
+const focusModePanel = document.getElementById("focusModePanel");
 
 const taskInput = document.getElementById("taskInput");
 const addTaskBtn = document.getElementById("addTaskBtn");
+const addTaskRow = document.querySelector(".add-task-row");
+const candidateFullMessage = document.getElementById("candidateFullMessage");
 const taskList = document.getElementById("taskList");
-const completedTaskList = document.getElementById("completedTaskList");
-const completedToggleBtn = document.getElementById("completedToggleBtn");
 const taskCountPill = document.getElementById("taskCountPill");
 const taskCount = document.getElementById("taskCount");
 const currentBox = document.getElementById("currentBox");
 const currentTaskText = document.getElementById("currentTaskText");
 const completeCurrentTaskBtn = document.getElementById("completeCurrentTaskBtn");
+const reselectTaskBtn = document.getElementById("reselectTaskBtn");
 
 const nextStepSection = document.getElementById("nextStepSection");
-const nextStepView = document.getElementById("nextStepView");
-const nextStepText = document.getElementById("nextStepText");
+const stepSectionTitle = document.getElementById("stepSectionTitle");
+const stepSectionDesc = document.getElementById("stepSectionDesc");
 const nextStepCount = document.getElementById("nextStepCount");
-const nextStepActions = document.getElementById("nextStepActions");
-const completeNextStepBtn = document.getElementById("completeNextStepBtn");
-const editNextStepBtn = document.getElementById("editNextStepBtn");
-const nextStepEditor = document.getElementById("nextStepEditor");
-const nextStepInput = document.getElementById("nextStepInput");
-const nextStepSaveNote = document.getElementById("nextStepSaveNote");
-const closeNextStepEditorBtn = document.getElementById("closeNextStepEditorBtn");
-const interruptionSummary = document.getElementById("interruptionSummary");
-const interruptionModal = document.getElementById("interruptionModal");
-const interruptionInput = document.getElementById("interruptionInput");
-const cancelInterruptionBtn = document.getElementById("cancelInterruptionBtn");
-const skipInterruptionBtn = document.getElementById("skipInterruptionBtn");
-const completeInterruptionBtn = document.getElementById("completeInterruptionBtn");
-const saveProgressBtn = document.getElementById("saveProgressBtn");
+const continueBox = document.getElementById("continueBox");
+const stepList = document.getElementById("stepList");
+const stepEmpty = document.getElementById("stepEmpty");
+const addStepToggleBtn = document.getElementById("addStepToggleBtn");
+const stepHelperPanel = document.getElementById("stepHelperPanel");
+const aiHelperToggleBtn = document.getElementById("aiHelperToggleBtn");
+const aiHelperPanel = document.getElementById("aiHelperPanel");
+const stepPromptPreview = document.getElementById("stepPromptPreview");
+const bulkStepInput = document.getElementById("bulkStepInput");
+const bulkStepNote = document.getElementById("bulkStepNote");
+const copyStepPromptBtn = document.getElementById("copyStepPromptBtn");
+const importStepsBtn = document.getElementById("importStepsBtn");
 
-const parkingInput = document.getElementById("parkingInput");
-const addParkingBtn = document.getElementById("addParkingBtn");
 const parkingToggleBtn = document.getElementById("parkingToggleBtn");
 const parkingList = document.getElementById("parkingList");
 
-let supportSaveTimer = null;
-let isNextStepEditorOpen = false;
-let editingNextStepTaskId = null;
 let hasShownSaveError = false;
 let isTaskInputComposing = false;
+let isBulkStepInputComposing = false;
+let isAiHelperOpen = false;
+let aiHelperTaskId = null;
+let isAddStepOpen = false;
+let addStepTaskId = null;
+let selectedCandidateTaskId = null;
+let selectedParkingItemId = null;
+const aiHelperTouchedTaskIds = new Set();
+const allDoneAutoOpenedTaskIds = new Set();
 
 function createId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -87,18 +91,266 @@ function normalizeTask(task) {
   const source = task || {};
   const now = new Date().toISOString();
   const stepCount = Number(source.stepCount);
+  const nextStep = typeof source.nextStep === "string" ? source.nextStep : "";
+  const sourceSteps = Array.isArray(source.steps) ? source.steps.map(normalizeStep).filter(step => step.text) : [];
+  const steps = sourceSteps.length > 0
+    ? sourceSteps
+    : nextStep.trim()
+      ? [{
+          id: createId(),
+          text: nextStep.trim(),
+          done: false,
+          createdAt: source.updatedAt || source.createdAt || now,
+          updatedAt: source.updatedAt || source.createdAt || now
+        }]
+      : [];
 
   return {
     id: source.id || createId(),
     text: String(source.text || ""),
     createdAt: source.createdAt || now,
     updatedAt: source.updatedAt || source.createdAt || now,
-    nextStep: typeof source.nextStep === "string" ? source.nextStep : "",
+    nextStep,
     stepCount: Number.isFinite(stepCount) && stepCount > 0 ? Math.floor(stepCount) : 0,
+    steps,
     interruptionNote: typeof source.interruptionNote === "string" ? source.interruptionNote : "",
     interruptedAt: typeof source.interruptedAt === "string" ? source.interruptedAt : null,
     progressLogs: Array.isArray(source.progressLogs) ? source.progressLogs : []
   };
+}
+
+function normalizeStep(step) {
+  const source = step || {};
+  const now = new Date().toISOString();
+
+  return {
+    id: source.id || createId(),
+    text: String(source.text || ""),
+    done: Boolean(source.done),
+    createdAt: source.createdAt || now,
+    updatedAt: source.updatedAt || source.createdAt || now
+  };
+}
+
+function createStep(text, { done = false, createdAt = null, updatedAt = null } = {}) {
+  const now = new Date().toISOString();
+
+  return {
+    id: createId(),
+    text,
+    done,
+    createdAt: createdAt || now,
+    updatedAt: updatedAt || createdAt || now
+  };
+}
+
+function cleanStepLine(line) {
+  return String(line || "")
+    .trim()
+    .replace(/^```[\w-]*\s*$/, "")
+    .replace(/^[-*・]\s*/, "")
+    .replace(/^\d+[.)、]\s*/, "")
+    .replace(/^[-*]\s*\[[ xX]\]\s*/, "")
+    .replace(/^[□☐✓✔]\s*/, "")
+    .trim();
+}
+
+function parseStepLines(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map(cleanStepLine)
+    .filter(Boolean);
+}
+
+function buildStepPrompt(taskText) {
+  return `次のタスクについて、「今すぐ始められる最初の一歩候補」を3つだけ出してください。
+
+目的は、完了までの計画やTODOリストを作ることではありません。
+ユーザーが「どれなら今できそう？」と思える候補を出すことです。
+
+タスク:
+${taskText}
+
+出力形式:
+- 次の一歩候補を3つだけ
+- 各候補を別々のコードブロックで出力
+- 1つのコードブロックには1候補だけ入れる
+- コードブロックの外に説明を書かない
+- 番号、箇条書き記号、前置き、説明文、励まし文は不要
+
+お願い:
+- 5分以内に始められる
+- すぐ身体を動かせる
+- 「考える」より「見る」「開く」「1個だけ動かす」を優先
+- 抽象語を避け、物理動作で書く
+- 「準備する」「整理する」「確認する」だけで終わらせず、何を開く/見る/置くかまで書く
+- 1候補は30文字前後まで
+- 各候補は独立させ、順番依存にしない
+- 認知負荷を増やさない
+- 3案は互いに重複させない
+- 長期計画や網羅的な手順にしない
+- 未来のTODOを増やしすぎない
+- 完璧な分解ではなく、今動くための補助輪にする
+- 判断が必要なら、「判断材料を1つ集める」に分解
+
+追加でユーザーが短く返した場合:
+- 「小さく」: 前の案よりさらに小さく、5分以内に動ける別案を3つ出す
+- 「大きく」: 前の案より少しだけ進める別案を3つ出す
+- 「別」または「他」: 同じくらいの大きさで、重複しない別案を3つ出す`;
+}
+
+function buildMoreStepPrompt(task) {
+  const completedSteps = (Array.isArray(task.steps) ? task.steps : [])
+    .map(normalizeStep)
+    .filter(step => step.done)
+    .map(step => `- ${step.text}`)
+    .join("\n") || "- まだありません";
+
+  return `次のタスクを進めています。
+ここまでの進捗をもとに、「今すぐ始められる次の一歩候補」を3つだけ出してください。
+
+目的は、完了までの計画やTODOリストを作ることではありません。
+ユーザーが「どれなら今できそう？」と思える候補を出すことです。
+
+タスク:
+${task.text}
+
+ここまでできたこと:
+${completedSteps}
+
+出力形式:
+- 次の一歩候補を3つだけ
+- 各候補を別々のコードブロックで出力
+- 1つのコードブロックには1候補だけ入れる
+- コードブロックの外に説明を書かない
+- 番号、箇条書き記号、前置き、説明文、励まし文は不要
+
+お願い:
+- 5分以内に始められる
+- すぐ身体を動かせる
+- 「考える」より「見る」「開く」「1個だけ動かす」を優先
+- 抽象語を避け、物理動作で書く
+- 「準備する」「整理する」「確認する」だけで終わらせず、何を開く/見る/置くかまで書く
+- 1候補は30文字前後まで
+- 各候補は独立させ、順番依存にしない
+- 認知負荷を増やさない
+- 3案は互いに重複させない
+- 長期計画や網羅的な手順にしない
+- 未来のTODOを増やしすぎない
+- 完璧な分解ではなく、今動くための補助輪にする
+- 判断が必要なら、「判断材料を1つ集める」に分解
+
+追加でユーザーが短く返した場合:
+- 「小さく」: 前の案よりさらに小さく、5分以内に動ける別案を3つ出す
+- 「大きく」: 前の案より少しだけ進める別案を3つ出す
+- 「別」または「他」: 同じくらいの大きさで、重複しない別案を3つ出す`;
+}
+
+function formatStepListForPrompt(steps, fallbackText) {
+  const lines = (Array.isArray(steps) ? steps : [])
+    .map(normalizeStep)
+    .filter(step => step.text)
+    .map(step => `- ${step.text}`);
+
+  return lines.join("\n") || fallbackText;
+}
+
+function buildAddStepPrompt(task) {
+  const steps = Array.isArray(task.steps) ? task.steps.map(normalizeStep) : [];
+  const completedSteps = formatStepListForPrompt(
+    steps.filter(step => step.done),
+    "- まだありません"
+  );
+  const openSteps = formatStepListForPrompt(
+    steps.filter(step => !step.done),
+    "- まだありません"
+  );
+
+  return `次のタスクを進めています。
+今ある小さな一歩と進捗を見て、「今すぐ始められる次の一歩候補」を3つだけ出してください。
+
+目的は、完了までの計画やTODOリストを作ることではありません。
+ユーザーが「どれなら今できそう？」と思える候補を出すことです。
+
+タスク:
+${task.text}
+
+完了した小さな一歩:
+${completedSteps}
+
+未完了の小さな一歩:
+${openSteps}
+
+出力形式:
+- 次の一歩候補を3つだけ
+- 各候補を別々のコードブロックで出力
+- 1つのコードブロックには1候補だけ入れる
+- コードブロックの外に説明を書かない
+- 番号、箇条書き記号、前置き、説明文、励まし文は不要
+
+お願い:
+- 5分以内に始められる
+- すぐ身体を動かせる
+- 「考える」より「見る」「開く」「1個だけ動かす」を優先
+- 抽象語を避け、物理動作で書く
+- 「準備する」「整理する」「確認する」だけで終わらせず、何を開く/見る/置くかまで書く
+- 1候補は30文字前後まで
+- 各候補は独立させ、順番依存にしない
+- 認知負荷を増やさない
+- すでにある小さな一歩と重複させない
+- 3案は互いに重複させない
+- 長期計画や網羅的な手順にしない
+- 未来のTODOを増やしすぎない
+- 完璧な分解ではなく、今動くための補助輪にする
+- 判断が必要なら、「判断材料を1つ集める」に分解
+
+追加でユーザーが短く返した場合:
+- 「小さく」: 前の案よりさらに小さく、5分以内に動ける別案を3つ出す
+- 「大きく」: 前の案より少しだけ進める別案を3つ出す
+- 「別」または「他」: 同じくらいの大きさで、重複しない別案を3つ出す`;
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      console.warn("Clipboard API copy failed. Falling back to textarea copy.", error);
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.width = "1px";
+  textarea.style.height = "1px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  const copied = document.execCommand("copy");
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error("copy failed");
+  }
+}
+
+function getNextOpenStep(task) {
+  if (!task || !Array.isArray(task.steps)) return null;
+  return task.steps.find(step => !step.done) ?? null;
+}
+
+function syncCurrentStepText(task) {
+  if (!task) return;
+  task.steps = Array.isArray(task.steps) ? task.steps.map(normalizeStep).filter(step => step.text) : [];
+  task.nextStep = getNextOpenStep(task)?.text ?? "";
 }
 
 function normalizeParkingItem(item) {
@@ -133,11 +385,10 @@ function loadState() {
       : [];
     state.currentTaskId = source.currentTaskId ?? null;
     state.parking = Array.isArray(source.parking) ? source.parking.map(normalizeParkingItem) : [];
-    state.showCompleted = Boolean(source.showCompleted);
     state.showParking = Boolean(source.showParking);
 
-    if (!state.tasks.some(task => task.id === state.currentTaskId)) {
-      state.currentTaskId = state.tasks[0]?.id ?? null;
+    if (state.currentTaskId && !state.tasks.some(task => task.id === state.currentTaskId)) {
+      state.currentTaskId = null;
     }
   } catch (error) {
     console.error("保存データの読み込みに失敗しました:", error);
@@ -187,6 +438,14 @@ function escapeHtml(str) {
     .replaceAll("'", "&#039;");
 }
 
+function cssEscape(str) {
+  if (window.CSS && typeof window.CSS.escape === "function") {
+    return window.CSS.escape(str);
+  }
+
+  return String(str).replace(/["\\]/g, "\\$&");
+}
+
 function shouldReduceMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -221,6 +480,40 @@ function celebrateWithLeaves(sourceElement, count = 8) {
 
 function getCurrentTask() {
   return state.tasks.find(task => task.id === state.currentTaskId) ?? null;
+}
+
+function getSelectedCandidateTask() {
+  return state.tasks.find(task => task.id === selectedCandidateTaskId) ?? null;
+}
+
+function getSelectedParkingItem() {
+  return state.parking.find(item => item.id === selectedParkingItemId) ?? null;
+}
+
+function ensureSelectedCandidate() {
+  if (state.tasks.length === 0) {
+    selectedCandidateTaskId = null;
+    return null;
+  }
+
+  const selectedTask = getSelectedCandidateTask();
+  if (selectedTask) return selectedTask;
+
+  selectedCandidateTaskId = state.tasks[0].id;
+  return state.tasks[0];
+}
+
+function ensureSelectedParkingItem() {
+  if (state.parking.length === 0) {
+    selectedParkingItemId = null;
+    return null;
+  }
+
+  const selectedItem = getSelectedParkingItem();
+  if (selectedItem) return selectedItem;
+
+  selectedParkingItemId = state.parking[0].id;
+  return state.parking[0];
 }
 
 function ensureCurrentTask() {
@@ -287,113 +580,179 @@ function handleTabKeydown(event) {
 
 function renderCurrentTask() {
   const currentTask = getCurrentTask();
+  const emptyText = state.tasks.length > 0 ? SELECT_CURRENT_TASK_TEXT : EMPTY_CURRENT_TASK_TEXT;
+
   currentTaskText.innerHTML = currentTask
-    ? `<span class="task-leaf current-task-leaf is-current" aria-hidden="true"></span><span>${escapeHtml(currentTask.text)}</span>`
-    : EMPTY_CURRENT_TASK_TEXT;
+    ? `<span>${escapeHtml(currentTask.text)}</span>`
+    : emptyText;
   currentTaskText.classList.toggle("is-empty", !currentTask);
   currentTaskText.setAttribute("role", currentTask ? "text" : "button");
   currentTaskText.tabIndex = currentTask ? -1 : 0;
   currentTaskText.setAttribute(
     "aria-label",
-    currentTask ? currentTask.text : "今日の候補を入力する"
+    currentTask
+      ? currentTask.text
+      : state.tasks.length > 0
+        ? "候補からこれを進めるを選ぶ"
+        : "今日の候補を入力する"
   );
   completeCurrentTaskBtn.hidden = !currentTask;
-  saveProgressBtn.hidden = !currentTask;
+  reselectTaskBtn.hidden = !currentTask;
+}
+
+function renderMode() {
+  const isFocusMode = Boolean(getCurrentTask());
+
+  inputModePanel.classList.toggle("is-active", !isFocusMode);
+  focusModePanel.classList.toggle("is-active", isFocusMode);
 }
 
 function renderSupportPanel() {
   const currentTask = getCurrentTask();
-  const hasTasks = state.tasks.length > 0;
 
-  nextStepSection.hidden = !hasTasks;
+  nextStepSection.hidden = !currentTask;
 
-  nextStepInput.disabled = !currentTask;
-  editNextStepBtn.disabled = !currentTask;
-  saveProgressBtn.disabled = !currentTask;
+  bulkStepInput.disabled = !currentTask;
+  copyStepPromptBtn.disabled = !currentTask;
+  importStepsBtn.disabled = !currentTask;
 
   renderNextStep(currentTask);
-
-  if (!currentTask) {
-    interruptionSummary.innerHTML = `<div class="empty">今日の候補から選ぶと、ここに再開メモが表示されます。</div>`;
-    return;
-  }
-
-  nextStepInput.placeholder = "例：床のものを1つ拾う / 冷蔵庫を見る";
-  renderInterruptionSummary(currentTask);
 }
 
 function renderNextStep(task) {
-  const nextStep = task?.nextStep?.trim() ?? "";
-  const stepCount = task?.stepCount ?? 0;
-
-  nextStepText.textContent = nextStep || EMPTY_NEXT_STEP_TEXT;
-  nextStepText.classList.toggle("is-empty", !nextStep);
-  nextStepView.classList.toggle("is-empty", !nextStep);
-  nextStepView.setAttribute("aria-label", nextStep ? "次の一歩を変更する" : "次の一歩を書く");
-  nextStepCount.textContent = stepCount > 0 ? `${stepCount}歩進みました` : DEFAULT_NEXT_STEP_COUNT_TEXT;
-  nextStepCount.hidden = !task;
-  nextStepCount.classList.toggle("is-done", stepCount > 0);
-  completeNextStepBtn.hidden = !nextStep;
-  editNextStepBtn.textContent = nextStep ? "変える" : "次の一歩を書く";
-  editNextStepBtn.classList.toggle("btn-primary", !nextStep);
-  editNextStepBtn.classList.toggle("btn-soft", Boolean(nextStep));
-  nextStepInput.value = nextStep;
-  nextStepSaveNote.textContent = task ? "自動保存されます" : "";
-
-  if (!task) {
-    isNextStepEditorOpen = false;
-    editingNextStepTaskId = null;
-  } else if (editingNextStepTaskId && editingNextStepTaskId !== task.id) {
-    isNextStepEditorOpen = false;
-    editingNextStepTaskId = null;
+  if (task) {
+    syncCurrentStepText(task);
   }
 
-  nextStepEditor.hidden = !isNextStepEditorOpen;
-  nextStepView.hidden = isNextStepEditorOpen;
-  nextStepActions.hidden = isNextStepEditorOpen;
+  const nextOpenStep = getNextOpenStep(task);
+  const steps = Array.isArray(task?.steps) ? task.steps : [];
+  const doneCount = steps.filter(step => step.done).length;
+  const hasSteps = steps.length > 0;
+  const isAllDone = hasSteps && !nextOpenStep;
+
+  if (!task || aiHelperTaskId !== task.id) {
+    aiHelperTaskId = task?.id ?? null;
+    isAiHelperOpen = false;
+  }
+
+  if (!task || addStepTaskId !== task.id) {
+    addStepTaskId = task?.id ?? null;
+    isAddStepOpen = false;
+  }
+
+  const canAddStep = Boolean(task) && hasSteps && !isAllDone;
+
+  if (task && isAllDone && aiHelperTouchedTaskIds.has(task.id) && !allDoneAutoOpenedTaskIds.has(task.id)) {
+    isAiHelperOpen = true;
+    allDoneAutoOpenedTaskIds.add(task.id);
+  }
+
+  stepSectionTitle.textContent = hasSteps ? "一歩ずつ進める" : "最初の一歩を決める";
+  stepSectionDesc.textContent = hasSteps
+    ? "小さく分けたものを、上からひとつずつ進めましょう。"
+    : "\"最初の一歩\"を決めると、\"いまやること\"を始めやすくなります。";
+  nextStepCount.textContent = hasSteps ? `${doneCount}/${steps.length}歩できました` : DEFAULT_NEXT_STEP_COUNT_TEXT;
+  nextStepCount.hidden = !task;
+  nextStepCount.classList.toggle("is-done", doneCount > 0);
+  stepEmpty.hidden = true;
+  continueBox.hidden = !isAllDone;
+  addStepToggleBtn.hidden = !canAddStep;
+  addStepToggleBtn.setAttribute("aria-expanded", String(canAddStep && isAddStepOpen));
+  addStepToggleBtn.innerHTML = `
+    <span class="accordion-label">🌱 小さな一歩を足す</span>
+    <span class="add-step-toggle-action">
+      <span>${isAddStepOpen ? "閉じる" : "見る"}</span>
+      <span class="accordion-arrow" aria-hidden="true">${isAddStepOpen ? "▲" : "▼"}</span>
+    </span>
+  `;
+  stepHelperPanel.hidden = canAddStep ? !isAddStepOpen : hasSteps && !isAllDone;
+  importStepsBtn.textContent = hasSteps ? "一歩を追加" : "これから始める";
+  bulkStepInput.placeholder = hasSteps
+    ? "足したい一歩を1行ずつ書きます（AIの回答を貼ってもOK）"
+    : "例：カーテンを開ける / メールを開く\n迷ったときは、AIに考えてもらうことができます。";
+  bulkStepInput.classList.toggle("is-first-step-input", !hasSteps);
+  aiHelperToggleBtn.setAttribute("aria-expanded", String(isAiHelperOpen));
+  aiHelperToggleBtn.innerHTML = `
+    <span class="accordion-label">🧩 AIに一歩を考えてもらう</span>
+    <span class="ai-helper-toggle-action">
+      <span>${isAiHelperOpen ? "閉じる" : "見る"}</span>
+      <span class="accordion-arrow" aria-hidden="true">${isAiHelperOpen ? "▲" : "▼"}</span>
+    </span>
+  `;
+  aiHelperPanel.hidden = !isAiHelperOpen;
+  stepPromptPreview.value = task
+    ? isAllDone
+      ? buildMoreStepPrompt(task)
+      : hasSteps
+        ? buildAddStepPrompt(task)
+        : buildStepPrompt(task.text)
+    : "";
+  renderStepList(task, nextOpenStep?.id);
 }
 
-function openNextStepEditor() {
-  if (!getCurrentTask()) return;
+function renderStepList(task, currentStepId) {
+  stepList.innerHTML = "";
 
-  isNextStepEditorOpen = true;
-  editingNextStepTaskId = getCurrentTask().id;
-  renderNextStep(getCurrentTask());
+  if (!task || !Array.isArray(task.steps) || task.steps.length === 0) return;
 
-  requestAnimationFrame(() => {
-    nextStepInput.focus();
+  task.steps.forEach(step => {
+    const isCurrentStep = step.id === currentStepId;
+    const item = document.createElement("div");
+    item.className = [
+      "step-item",
+      step.done ? "is-done" : "is-editable",
+      isCurrentStep ? "is-current-step" : ""
+    ].filter(Boolean).join(" ");
+
+    item.innerHTML = `
+      <span class="step-marker" aria-hidden="true">${step.done ? "✓" : ""}</span>
+      <div class="step-content">
+        ${step.done
+          ? `<span class="step-text">${escapeHtml(step.text)}</span>`
+          : `<input class="step-edit-input" type="text" value="${escapeHtml(step.text)}" data-step-id="${escapeHtml(step.id)}" data-original-text="${escapeHtml(step.text)}" aria-label="小さな一歩を編集">`}
+      </div>
+      ${isCurrentStep ? `<button class="btn-done small step-done-btn" data-step-action="done" data-step-id="${escapeHtml(step.id)}" type="button">できた</button>` : ""}
+    `;
+
+    stepList.appendChild(item);
   });
 }
 
-function closeNextStepEditor() {
-  if (supportSaveTimer) {
-    clearTimeout(supportSaveTimer);
-    supportSaveTimer = null;
-    saveNextStepNow();
-  }
+function updateStepText(stepId, text) {
+  const currentTask = getCurrentTask();
+  const step = currentTask?.steps?.find(item => item.id === stepId);
 
-  isNextStepEditorOpen = false;
-  editingNextStepTaskId = null;
-  renderNextStep(getCurrentTask());
+  if (!step || step.done) return;
+
+  step.text = text;
+  step.updatedAt = new Date().toISOString();
+  currentTask.nextStep = getNextOpenStep(currentTask)?.text ?? "";
+  currentTask.updatedAt = step.updatedAt;
+
+  saveState();
 }
 
-function completeNextStep() {
+function completeStep(stepId) {
   const currentTask = ensureCurrentTask();
-  if (!currentTask || !currentTask.nextStep) return;
+  if (!currentTask) return;
 
-  celebrateWithLeaves(completeNextStepBtn, 6);
+  currentTask.steps = Array.isArray(currentTask.steps) ? currentTask.steps.map(normalizeStep) : [];
+  const openStep = getNextOpenStep(currentTask);
+  const step = stepId
+    ? currentTask.steps.find(item => item.id === stepId && !item.done)
+    : openStep;
 
-  if (supportSaveTimer) {
-    clearTimeout(supportSaveTimer);
-    supportSaveTimer = null;
-  }
+  if (!step || step.id !== openStep?.id) return;
+
+  const button = stepList.querySelector(`[data-step-action="done"][data-step-id="${cssEscape(step.id)}"]`);
+  celebrateWithLeaves(button, 6);
 
   currentTask.stepCount = (Number(currentTask.stepCount) || 0) + 1;
-  currentTask.nextStep = "";
-  currentTask.updatedAt = new Date().toISOString();
-  nextStepInput.value = "";
-  isNextStepEditorOpen = false;
-  editingNextStepTaskId = null;
+  const now = new Date().toISOString();
+  step.done = true;
+  step.updatedAt = now;
+  syncCurrentStepText(currentTask);
+  currentTask.updatedAt = now;
 
   saveState();
   renderAll();
@@ -401,25 +760,111 @@ function completeNextStep() {
 
 function setCurrentTask(taskId) {
   state.currentTaskId = taskId;
+  isAiHelperOpen = false;
+  aiHelperTaskId = taskId;
+  isAddStepOpen = false;
+  addStepTaskId = taskId;
   saveState();
   renderAll();
+}
+
+function returnToTaskSelection() {
+  setActiveTab("use");
+
+  if (!state.currentTaskId) {
+    renderAll();
+    return;
+  }
+
+  state.currentTaskId = null;
+  isAiHelperOpen = false;
+  aiHelperTaskId = null;
+  isAddStepOpen = false;
+  addStepTaskId = null;
+
+  saveState();
+  renderAll();
+}
+
+function toggleAddStep() {
+  isAddStepOpen = !isAddStepOpen;
+  const currentTask = getCurrentTask();
+
+  if (isAddStepOpen && currentTask) {
+    isAiHelperOpen = true;
+    aiHelperTouchedTaskIds.add(currentTask.id);
+  }
+
+  renderSupportPanel();
+}
+
+function toggleAiHelper() {
+  isAiHelperOpen = !isAiHelperOpen;
+  const currentTask = getCurrentTask();
+
+  if (isAiHelperOpen && currentTask) {
+    aiHelperTouchedTaskIds.add(currentTask.id);
+  }
+
+  renderSupportPanel();
+}
+
+function importBulkSteps() {
+  const currentTask = ensureCurrentTask();
+  if (!currentTask) return;
+
+  const lines = parseStepLines(bulkStepInput.value);
+
+  if (lines.length === 0) {
+    bulkStepNote.textContent = "取り込む一歩を書いてください";
+    return;
+  }
+
+  currentTask.steps = Array.isArray(currentTask.steps) ? currentTask.steps.map(normalizeStep) : [];
+  const hadSteps = currentTask.steps.length > 0;
+  lines.forEach(line => {
+    currentTask.steps.push(createStep(line));
+  });
+
+  syncCurrentStepText(currentTask);
+
+  currentTask.updatedAt = new Date().toISOString();
+  bulkStepInput.value = "";
+  bulkStepNote.textContent = lines.length === 1
+    ? hadSteps ? "一歩を追加しました" : "これから始める一歩を置きました"
+    : `${lines.length}件に分けました`;
+  isAiHelperOpen = false;
+  isAddStepOpen = true;
+
+  saveState();
+  renderAll();
+  requestAnimationFrame(() => {
+    bulkStepInput.focus();
+  });
+}
+
+async function copyStepPrompt() {
+  const currentTask = ensureCurrentTask();
+  if (!currentTask) return;
+
+  try {
+    const prompt = stepPromptPreview.value || buildStepPrompt(currentTask.text);
+    await copyText(prompt);
+    bulkStepNote.textContent = "AIに見せる文をコピーしました";
+  } catch (error) {
+    console.error("AIに見せる文のコピーに失敗しました:", error);
+    bulkStepNote.textContent = "コピーに失敗しました";
+  }
 }
 
 function focusCurrentTaskBox() {
   if (!currentBox) return;
 
-  currentBox.classList.remove("is-highlighted");
-
   if (!shouldReduceMotion()) {
     currentBox.scrollIntoView({ behavior: "smooth", block: "center" });
   } else {
     currentBox.scrollIntoView({ block: "center" });
-    return;
   }
-
-  requestAnimationFrame(() => {
-    currentBox.classList.add("is-highlighted");
-  });
 }
 
 function focusTaskInput() {
@@ -445,28 +890,28 @@ function addTask() {
   }
 
   if (state.tasks.length >= 3) {
-    alert("今日の候補は3つまでです。今見ないタスクや作業中の思いつきは「いったん置く」に置いておけます。");
+    alert("今日の候補は3つまでです。今見ないタスクや作業中の思いつきは「後でやること置き場」に置いておけます。");
     return;
   }
 
   const now = new Date().toISOString();
 
-  state.tasks.push({
+  const task = {
     id: createId(),
     text,
     createdAt: now,
     updatedAt: now,
     nextStep: "",
     stepCount: 0,
+    steps: [],
     interruptionNote: "",
     interruptedAt: null,
     progressLogs: []
-  });
+  };
 
-  if (!state.currentTaskId) {
-    state.currentTaskId = state.tasks[0].id;
-  }
-
+  state.tasks.push(task);
+  selectedCandidateTaskId = task.id;
+  state.currentTaskId = null;
   taskInput.value = "";
   saveState();
   renderAll();
@@ -476,7 +921,11 @@ function deleteTask(taskId) {
   state.tasks = state.tasks.filter(task => task.id !== taskId);
 
   if (state.currentTaskId === taskId) {
-    state.currentTaskId = state.tasks[0]?.id ?? null;
+    state.currentTaskId = null;
+  }
+
+  if (selectedCandidateTaskId === taskId) {
+    selectedCandidateTaskId = null;
   }
 
   saveState();
@@ -499,7 +948,11 @@ function completeTask(taskId) {
   state.tasks = state.tasks.filter(t => t.id !== taskId);
 
   if (state.currentTaskId === taskId) {
-    state.currentTaskId = state.tasks[0]?.id ?? null;
+    state.currentTaskId = null;
+  }
+
+  if (selectedCandidateTaskId === taskId) {
+    selectedCandidateTaskId = null;
   }
 
   saveState();
@@ -512,36 +965,6 @@ function completeCurrentTask() {
 
   celebrateWithLeaves(completeCurrentTaskBtn, 12);
   completeTask(currentTask.id);
-}
-
-function restoreTask(taskId) {
-  const task = state.completedTasks.find(t => t.id === taskId);
-  if (!task) return;
-
-  if (state.tasks.length >= 3) {
-    alert("今日の候補は3つまでです。先にどれか整理してください。");
-    return;
-  }
-
-  state.tasks.push({
-    ...normalizeTask(task),
-    updatedAt: new Date().toISOString()
-  });
-
-  state.completedTasks = state.completedTasks.filter(t => t.id !== taskId);
-
-  if (!state.currentTaskId) {
-    state.currentTaskId = task.id;
-  }
-
-  saveState();
-  renderAll();
-}
-
-function deleteCompletedTask(taskId) {
-  state.completedTasks = state.completedTasks.filter(t => t.id !== taskId);
-  saveState();
-  renderCompletedTasks();
 }
 
 function moveTaskToParking(taskId) {
@@ -558,17 +981,15 @@ function moveTaskToParking(taskId) {
   state.tasks = state.tasks.filter(t => t.id !== taskId);
 
   if (state.currentTaskId === taskId) {
-    state.currentTaskId = state.tasks[0]?.id ?? null;
+    state.currentTaskId = null;
+  }
+
+  if (selectedCandidateTaskId === taskId) {
+    selectedCandidateTaskId = null;
   }
 
   saveState();
   renderAll();
-}
-
-function toggleCompletedSection() {
-  state.showCompleted = !state.showCompleted;
-  saveState();
-  renderCompletedTasks();
 }
 
 function toggleParkingSection() {
@@ -581,13 +1002,7 @@ function renderTaskSupportSummary(task) {
   const lines = [];
 
   if (task.nextStep) {
-    lines.push(`次の一歩：${escapeHtml(task.nextStep)}`);
-  }
-
-  if (task.interruptionNote) {
-    lines.push(`再開メモ：${escapeHtml(task.interruptionNote)}`);
-  } else if (task.interruptedAt) {
-    lines.push("再開メモ：メモなし");
+    lines.push(`小さな一歩：${escapeHtml(task.nextStep)}`);
   }
 
   if (lines.length === 0) return "";
@@ -595,278 +1010,87 @@ function renderTaskSupportSummary(task) {
   return `<div class="item-sub">${lines.join("<br>")}</div>`;
 }
 
-function renderTasks() {
-  taskList.innerHTML = "";
-  taskCount.textContent = state.tasks.length;
-  taskCountPill.classList.toggle("is-full", state.tasks.length >= 3);
-  addTaskBtn.disabled = state.tasks.length >= 3;
+function renderCandidatePicker(container) {
+  container.innerHTML = "";
 
   if (state.tasks.length === 0) {
+    selectedCandidateTaskId = null;
+    container.innerHTML = `<div class="empty">まずは、今日見てもいいものを1つ置いてみましょう。</div>`;
     return;
   }
+
+  const selectedTask = ensureSelectedCandidate();
+  const list = document.createElement("div");
+  list.className = "candidate-choice-list";
 
   state.tasks.forEach(task => {
-    const isCurrent = state.currentTaskId === task.id;
-
-    const item = document.createElement("div");
-    item.className = isCurrent ? "item is-current" : "item";
+    const isSelected = selectedTask?.id === task.id;
+    const item = document.createElement("label");
+    item.className = isSelected ? "candidate-choice is-selected" : "candidate-choice";
 
     item.innerHTML = `
-      <div class="item-top">
-        <div style="flex:1;">
-          <div class="item-text">
-            <span class="task-leaf ${isCurrent ? "is-current" : "is-candidate"}" aria-hidden="true"></span>
-            <span>${escapeHtml(task.text)}</span>
-          </div>
-          <div class="item-sub">
-            ${isCurrent ? "いま選ばれています" : "候補です"}
-          </div>
-          ${renderTaskSupportSummary(task)}
-        </div>
-      </div>
-      <div class="item-bottom">
-        <div class="item-actions">
-          ${isCurrent ? "" : `<button class="btn-primary small" data-action="current">これをやる</button>`}
-          <button class="btn-soft small" data-action="parking">いったん置く</button>
-          <button class="btn-danger small" data-action="delete">削除</button>
-        </div>
-        <div class="item-updated">更新 ${formatUpdatedAt(task.updatedAt || task.createdAt)}</div>
-      </div>
+      <input class="candidate-choice-input" type="radio" name="candidateTask" value="${escapeHtml(task.id)}" ${isSelected ? "checked" : ""}>
+      <span class="candidate-choice-mark" aria-hidden="true"></span>
+      <span class="candidate-choice-body">
+        <span class="item-text">
+          <span>${escapeHtml(task.text)}</span>
+        </span>
+        ${renderTaskSupportSummary(task)}
+      </span>
     `;
 
-    const currentButton = item.querySelector('[data-action="current"]');
-    if (currentButton) {
-      currentButton.addEventListener("click", () => {
-        setCurrentTask(task.id);
-        focusCurrentTaskBox();
-      });
-    }
-
-    item.querySelector('[data-action="parking"]').addEventListener("click", () => {
-      moveTaskToParking(task.id);
+    item.querySelector(".candidate-choice-input").addEventListener("change", () => {
+      selectedCandidateTaskId = task.id;
+      renderTasks();
     });
 
-    item.querySelector('[data-action="delete"]').addEventListener("click", () => {
-      deleteTask(task.id);
-    });
-
-    taskList.appendChild(item);
+    list.appendChild(item);
   });
-}
 
-function renderCompletedTasks() {
-  completedTaskList.style.display = state.showCompleted ? "flex" : "none";
-  completedToggleBtn.setAttribute("aria-expanded", String(state.showCompleted));
-
-  completedToggleBtn.innerHTML = `
-    <span class="accordion-label">できたこと</span>
-    <span class="accordion-meta">
-      <span class="completed-count">最近の${COMPLETED_LIMIT}件</span>
-      <span class="accordion-arrow" aria-hidden="true">${state.showCompleted ? "▲" : "▼"}</span>
-    </span>
+  const actions = document.createElement("div");
+  actions.className = "candidate-picker-actions";
+  actions.innerHTML = `
+    <button class="btn-primary small candidate-start-btn" data-action="current" type="button">これを進める</button>
+    <button class="candidate-text-action candidate-parking-action" data-action="parking" type="button">🪴後でやること置き場へ</button>
+    <button class="candidate-text-action candidate-delete-action" data-action="delete" type="button">候補から消す</button>
   `;
 
-  completedTaskList.innerHTML = "";
-
-  if (!state.showCompleted) {
-    return;
-  }
-
-  if (state.completedTasks.length === 0) {
-    completedTaskList.innerHTML = `<div class="empty">まだできたことはありません。</div>`;
-    return;
-  }
-
-  const latestCompleted = state.completedTasks.slice(0, COMPLETED_LIMIT);
-
-  latestCompleted.forEach(task => {
-    const item = document.createElement("div");
-    item.className = "item";
-
-    item.innerHTML = `
-      <div class="item-top">
-        <div style="flex:1;">
-          <div class="item-text completed-text">
-            <span class="completed-clover" aria-hidden="true">
-              <span></span>
-              <span></span>
-              <span></span>
-            </span>
-            <span>${escapeHtml(task.text)}</span>
-          </div>
-        </div>
-        <span class="pill completed-pill">できた</span>
-      </div>
-      <div class="item-bottom">
-        <div class="item-actions">
-          <button class="btn-soft small" data-action="restore">戻す</button>
-          <button class="btn-danger small" data-action="delete">削除</button>
-        </div>
-        <div class="item-updated">完了 ${formatUpdatedAt(task.completedAt)}</div>
-      </div>
-    `;
-
-    item.querySelector('[data-action="restore"]').addEventListener("click", () => {
-      restoreTask(task.id);
-    });
-
-    item.querySelector('[data-action="delete"]').addEventListener("click", () => {
-      deleteCompletedTask(task.id);
-    });
-
-    completedTaskList.appendChild(item);
-  });
-}
-
-function saveSupportFields({ silent = false } = {}) {
-  const currentTask = ensureCurrentTask();
-  if (!currentTask) return;
-
-  currentTask.nextStep = getNextStepDraft();
-  currentTask.updatedAt = new Date().toISOString();
-
-  saveState();
-
-  if (!silent) {
-    renderAll();
-  }
-}
-
-function queueSupportAutosave() {
-  const currentTask = getCurrentTask();
-  if (!currentTask) return;
-
-  const taskId = currentTask.id;
-  const nextStep = getNextStepDraft();
-
-  nextStepSaveNote.textContent = "保存中...";
-
-  if (supportSaveTimer) {
-    clearTimeout(supportSaveTimer);
-  }
-
-  supportSaveTimer = setTimeout(() => {
-    const task = state.tasks.find(item => item.id === taskId);
+  actions.querySelector('[data-action="current"]').addEventListener("click", () => {
+    const task = getSelectedCandidateTask();
     if (!task) return;
 
-    task.nextStep = nextStep;
-    task.updatedAt = new Date().toISOString();
-
-    saveState();
-    nextStepSaveNote.textContent = "保存しました";
-    nextStepText.textContent = nextStep || EMPTY_NEXT_STEP_TEXT;
-    nextStepText.classList.toggle("is-empty", !nextStep);
-    completeNextStepBtn.hidden = !nextStep;
-    editNextStepBtn.textContent = nextStep ? "変える" : "次の一歩を書く";
-    editNextStepBtn.classList.toggle("btn-primary", !nextStep);
-    editNextStepBtn.classList.toggle("btn-soft", Boolean(nextStep));
-    renderTasks();
-  }, 350);
-}
-
-function getNextStepDraft() {
-  return nextStepInput.value.trim();
-}
-
-function saveNextStepNow() {
-  const currentTask = getCurrentTask();
-  if (!currentTask) return;
-
-  currentTask.nextStep = getNextStepDraft();
-  currentTask.updatedAt = new Date().toISOString();
-  saveState();
-  renderTasks();
-}
-
-function renderInterruptionSummary(task) {
-  if (!task.interruptedAt && !task.interruptionNote) {
-    interruptionSummary.innerHTML = `<div class="empty">まだこのタスクに再開メモはありません。</div>`;
-    return;
-  }
-
-  const note = task.interruptionNote ? escapeHtml(task.interruptionNote) : "メモなし";
-  const date = task.interruptedAt ? formatUpdatedAt(task.interruptedAt) : "日時なし";
-
-  interruptionSummary.innerHTML = `
-    <div class="interruption-note">
-      <div class="interruption-note-head">
-        <span class="interruption-note-title">いまやることの再開メモ</span>
-      </div>
-      <div class="interruption-note-text">${note}</div>
-      <div class="interruption-note-meta item-updated">更新 ${date}</div>
-    </div>
-  `;
-}
-
-function openInterruptionModal() {
-  const currentTask = ensureCurrentTask();
-  if (!currentTask) return;
-
-  saveSupportFields({ silent: true });
-  interruptionInput.value = currentTask.interruptionNote ?? "";
-
-  if (typeof interruptionModal.showModal === "function") {
-    interruptionModal.showModal();
-  } else {
-    interruptionModal.setAttribute("open", "");
-  }
-
-  requestAnimationFrame(() => {
-    interruptionInput.focus();
+    setCurrentTask(task.id);
+    focusCurrentTaskBox();
   });
-}
 
-function closeInterruptionModal() {
-  if (typeof interruptionModal.close === "function") {
-    interruptionModal.close();
-  } else {
-    interruptionModal.removeAttribute("open");
-  }
-}
+  actions.querySelector('[data-action="parking"]').addEventListener("click", () => {
+    const task = getSelectedCandidateTask();
+    if (!task) return;
 
-function completeInterruption({ clearNote = false } = {}) {
-  const currentTask = ensureCurrentTask();
-  if (!currentTask) return;
-
-  const now = new Date().toISOString();
-  saveSupportFields({ silent: true });
-
-  currentTask.interruptionNote = clearNote ? "" : interruptionInput.value.trim();
-  currentTask.interruptedAt = now;
-  currentTask.updatedAt = now;
-
-  saveState();
-  closeInterruptionModal();
-  renderAll();
-}
-
-function addParkingMemo() {
-  const text = parkingInput.value.trim();
-
-  if (!text) {
-    alert("置いておく内容が空です。");
-    return;
-  }
-
-  const now = new Date().toISOString();
-
-  state.parking.unshift({
-    id: createId(),
-    text,
-    createdAt: now,
-    updatedAt: now,
-    nextStep: "",
-    stepCount: 0,
-    interruptionNote: "",
-    interruptedAt: null,
-    progressLogs: [],
-    parkedAt: now
+    moveTaskToParking(task.id);
   });
-  state.showParking = true;
 
-  parkingInput.value = "";
-  saveState();
-  renderParking();
+  actions.querySelector('[data-action="delete"]').addEventListener("click", () => {
+    const task = getSelectedCandidateTask();
+    if (!task) return;
+
+    deleteTask(task.id);
+  });
+
+  container.appendChild(list);
+  container.appendChild(actions);
+}
+
+function renderTasks() {
+  const isFull = state.tasks.length >= 3;
+
+  taskCount.textContent = state.tasks.length;
+  taskCountPill.classList.toggle("is-full", isFull);
+  addTaskBtn.disabled = isFull;
+  addTaskRow.hidden = isFull;
+  candidateFullMessage.hidden = !isFull;
+
+  renderCandidatePicker(taskList);
 }
 
 function isImeComposing(event) {
@@ -877,19 +1101,17 @@ function shouldSubmitTaskInput(event) {
   return event.key === "Enter" && !isTaskInputComposing && !isImeComposing(event);
 }
 
-function shouldSubmitTextarea(event) {
-  return (
-    event.key === "Enter" &&
-    !event.shiftKey &&
-    !event.ctrlKey &&
-    !event.altKey &&
-    !event.metaKey &&
-    !isImeComposing(event)
-  );
+function shouldSubmitBulkStepInput(event) {
+  return event.key === "Enter" && !isBulkStepInputComposing && !isImeComposing(event);
 }
 
 function deleteParkingMemo(id) {
   state.parking = state.parking.filter(item => item.id !== id);
+
+  if (selectedParkingItemId === id) {
+    selectedParkingItemId = null;
+  }
+
   saveState();
   renderParking();
 }
@@ -910,24 +1132,67 @@ function returnParkingToTasks(id) {
     ...restoredTask,
     updatedAt: now,
   });
+  selectedCandidateTaskId = restoredTask.id;
 
   state.parking = state.parking.filter(item => item.id !== id);
-
-  if (!state.currentTaskId) {
-    state.currentTaskId = state.tasks[0].id;
-  }
+  selectedParkingItemId = null;
 
   saveState();
   renderAll();
+}
+
+function addParkingMemo(text) {
+  const trimmedText = cleanStepLine(text);
+
+  if (!trimmedText) return false;
+
+  const now = new Date().toISOString();
+  const id = createId();
+
+  state.parking.unshift({
+    id,
+    text: trimmedText,
+    createdAt: now,
+    updatedAt: now,
+    nextStep: "",
+    stepCount: 0,
+    steps: [],
+    interruptionNote: "",
+    interruptedAt: null,
+    progressLogs: [],
+    parkedAt: now
+  });
+
+  state.showParking = true;
+  selectedParkingItemId = id;
+  saveState();
+  renderParking();
+  return true;
+}
+
+function syncParkingSelectionUI() {
+  parkingList.querySelectorAll(".parking-choice").forEach(choice => {
+    const input = choice.querySelector(".parking-choice-input");
+    const isSelected = input?.value === selectedParkingItemId;
+
+    choice.classList.toggle("is-selected", isSelected);
+
+    if (input) {
+      input.checked = isSelected;
+    }
+  });
 }
 
 function renderParking() {
   parkingList.hidden = !state.showParking;
   parkingToggleBtn.setAttribute("aria-expanded", String(state.showParking));
   parkingToggleBtn.innerHTML = `
-    <span class="accordion-label">置いたもの</span>
-    <span class="accordion-meta">
+    <span class="parking-toggle-main">
+      <span class="accordion-label">🪴 後でやること置き場</span>
       <span class="parking-count">${state.parking.length}件</span>
+    </span>
+    <span class="parking-action-text">
+      <span>${state.showParking ? "閉じる" : "見る"}</span>
       <span class="accordion-arrow" aria-hidden="true">${state.showParking ? "▲" : "▼"}</span>
     </span>
   `;
@@ -938,47 +1203,97 @@ function renderParking() {
     return;
   }
 
+  const compose = document.createElement("div");
+  compose.className = "parking-compose-row";
+  compose.innerHTML = `
+    <input class="parking-compose-input" type="text" placeholder="例：あとで見る資料 / 返信するメール" maxlength="80">
+    <button class="parking-compose-btn" type="button">置く</button>
+  `;
+
+  const input = compose.querySelector(".parking-compose-input");
+  const button = compose.querySelector(".parking-compose-btn");
+  const submitParkingMemo = () => {
+    if (addParkingMemo(input.value)) {
+      input.value = "";
+      requestAnimationFrame(() => {
+        const nextInput = parkingList.querySelector(".parking-compose-input");
+        nextInput?.focus();
+      });
+    }
+  };
+
+  button.addEventListener("click", submitParkingMemo);
+  input.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || isImeComposing(event)) return;
+
+    event.preventDefault();
+    submitParkingMemo();
+  });
+
+  parkingList.appendChild(compose);
+
   if (state.parking.length === 0) {
-    parkingList.innerHTML = `<div class="empty">今のところ、置いたものはありません。</div>`;
+    selectedParkingItemId = null;
+    parkingList.insertAdjacentHTML("beforeend", `<div class="empty">今のところ、後でやることはありません。</div>`);
     return;
   }
 
+  const selectedItem = ensureSelectedParkingItem();
+  const list = document.createElement("div");
+  list.className = "parking-choice-list";
+
   state.parking.forEach(item => {
-    const el = document.createElement("div");
-    el.className = "item";
+    const isSelected = selectedItem?.id === item.id;
+    const el = document.createElement("label");
+    el.className = isSelected ? "parking-choice is-selected" : "parking-choice";
 
     el.innerHTML = `
-      <div class="item-top">
-        <div style="flex:1;">
-          <div class="item-text">${escapeHtml(item.text)}</div>
-        </div>
-      </div>
-      <div class="item-bottom">
-        <div class="item-actions">
-          <button class="btn-soft small" data-action="return">候補に戻す</button>
-          <button class="btn-danger small" data-action="delete">削除</button>
-        </div>
-        <div class="item-updated">作成 ${formatUpdatedAt(item.parkedAt || item.createdAt)}</div>
-      </div>
+      <input class="parking-choice-input" type="radio" name="parkingItem" value="${escapeHtml(item.id)}" ${isSelected ? "checked" : ""}>
+      <span class="parking-choice-mark" aria-hidden="true"></span>
+      <span class="parking-choice-body">
+        <span class="item-text">${escapeHtml(item.text)}</span>
+        <span class="item-updated">作成 ${formatUpdatedAt(item.parkedAt || item.createdAt)}</span>
+      </span>
     `;
 
-    el.querySelector('[data-action="return"]').addEventListener("click", () => {
-      returnParkingToTasks(item.id);
+    el.querySelector(".parking-choice-input").addEventListener("change", () => {
+      selectedParkingItemId = item.id;
+      syncParkingSelectionUI();
     });
 
-    el.querySelector('[data-action="delete"]').addEventListener("click", () => {
-      deleteParkingMemo(item.id);
-    });
-
-    parkingList.appendChild(el);
+    list.appendChild(el);
   });
+
+  const actions = document.createElement("div");
+  actions.className = "parking-picker-actions";
+  actions.innerHTML = `
+    <button class="btn-primary small parking-return-btn" data-action="return" type="button" ${state.tasks.length >= 3 ? "disabled" : ""}>候補に戻す</button>
+    <button class="parking-text-action parking-delete-action" data-action="delete" type="button">削除</button>
+  `;
+
+  actions.querySelector('[data-action="return"]').addEventListener("click", () => {
+    const item = getSelectedParkingItem();
+    if (!item) return;
+
+    returnParkingToTasks(item.id);
+  });
+
+  actions.querySelector('[data-action="delete"]').addEventListener("click", () => {
+    const item = getSelectedParkingItem();
+    if (!item) return;
+
+    deleteParkingMemo(item.id);
+  });
+
+  parkingList.appendChild(list);
+  parkingList.appendChild(actions);
 }
 
 function renderAll() {
+  renderMode();
   renderCurrentTask();
   renderSupportPanel();
   renderTasks();
-  renderCompletedTasks();
   renderParking();
 }
 
@@ -990,15 +1305,79 @@ tabButtons.forEach(button => {
 });
 
 brandHomeBtn.addEventListener("click", () => {
-  setActiveTab("use");
+  returnToTaskSelection();
 });
 
 addTaskBtn.addEventListener("click", addTask);
-addParkingBtn.addEventListener("click", addParkingMemo);
-completedToggleBtn.addEventListener("click", toggleCompletedSection);
 parkingToggleBtn.addEventListener("click", toggleParkingSection);
 completeCurrentTaskBtn.addEventListener("click", completeCurrentTask);
-completeNextStepBtn.addEventListener("click", completeNextStep);
+reselectTaskBtn.addEventListener("click", returnToTaskSelection);
+addStepToggleBtn.addEventListener("click", toggleAddStep);
+aiHelperToggleBtn.addEventListener("click", toggleAiHelper);
+copyStepPromptBtn.addEventListener("click", copyStepPrompt);
+importStepsBtn.addEventListener("click", importBulkSteps);
+
+bulkStepInput.addEventListener("compositionstart", () => {
+  isBulkStepInputComposing = true;
+});
+
+bulkStepInput.addEventListener("compositionend", () => {
+  setTimeout(() => {
+    isBulkStepInputComposing = false;
+  }, 0);
+});
+
+bulkStepInput.addEventListener("keydown", (event) => {
+  if (!shouldSubmitBulkStepInput(event)) return;
+
+  event.preventDefault();
+  importBulkSteps();
+});
+stepList.addEventListener("input", (event) => {
+  const input = event.target.closest(".step-edit-input");
+  if (!input) return;
+
+  updateStepText(input.dataset.stepId, input.value);
+});
+stepList.addEventListener("change", (event) => {
+  const input = event.target.closest(".step-edit-input");
+  if (!input) return;
+
+  const text = cleanStepLine(input.value);
+
+  if (!text) {
+    input.value = input.dataset.originalText || "";
+    updateStepText(input.dataset.stepId, input.value);
+    return;
+  }
+
+  input.value = text;
+  input.dataset.originalText = text;
+  updateStepText(input.dataset.stepId, text);
+});
+stepList.addEventListener("click", (event) => {
+  const button = event.target.closest('[data-step-action="done"]');
+  if (!button) return;
+
+  completeStep(button.dataset.stepId);
+});
+stepList.addEventListener("keydown", (event) => {
+  if (!event.target.closest(".step-edit-input")) return;
+
+  if (event.key === "Enter") {
+    event.preventDefault();
+    event.target.blur();
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    const originalText = event.target.dataset.originalText || "";
+    event.target.value = originalText;
+    updateStepText(event.target.dataset.stepId, originalText);
+    event.target.blur();
+  }
+});
 currentTaskText.addEventListener("click", () => {
   if (getCurrentTask()) return;
   focusTaskInput();
@@ -1011,24 +1390,6 @@ currentTaskText.addEventListener("keydown", (event) => {
     focusTaskInput();
   }
 });
-nextStepView.addEventListener("click", openNextStepEditor);
-nextStepView.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    openNextStepEditor();
-  }
-});
-editNextStepBtn.addEventListener("click", openNextStepEditor);
-closeNextStepEditorBtn.addEventListener("click", closeNextStepEditor);
-saveProgressBtn.addEventListener("click", openInterruptionModal);
-cancelInterruptionBtn.addEventListener("click", closeInterruptionModal);
-skipInterruptionBtn.addEventListener("click", () => {
-  completeInterruption({ clearNote: true });
-});
-completeInterruptionBtn.addEventListener("click", () => {
-  completeInterruption();
-});
-
 taskInput.addEventListener("compositionstart", () => {
   isTaskInputComposing = true;
 });
@@ -1045,28 +1406,6 @@ taskInput.addEventListener("keydown", (event) => {
   event.preventDefault();
   addTask();
 });
-
-nextStepInput.addEventListener("keydown", (event) => {
-  if (!shouldSubmitTextarea(event)) return;
-
-  event.preventDefault();
-  closeNextStepEditor();
-});
-
-parkingInput.addEventListener("keydown", (event) => {
-  if (!shouldSubmitTextarea(event)) return;
-
-  event.preventDefault();
-  addParkingMemo();
-});
-
-interruptionModal.addEventListener("click", (event) => {
-  if (event.target === interruptionModal) {
-    closeInterruptionModal();
-  }
-});
-
-nextStepInput.addEventListener("input", queueSupportAutosave);
 
 setActiveTab("use");
 loadState();
