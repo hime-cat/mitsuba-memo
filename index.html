@@ -5,6 +5,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>みつばメモ｜3つ選んで、ひとつだけ。ADHDや気分の波がある日のタスク補助</title>
+    <meta name="description" content="みつばメモは、今見るものを3つまでにしぼって、ひとつずつ進むための小さなタスク補助メモです。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="みつばメモ" />
+    <meta property="og:title" content="みつばメモ｜3つ選んで、ひとつだけ。" />
+    <meta property="og:description" content="今見るものを3つまでにしぼって、ひとつずつ進むための小さなタスク補助メモです。" />
+    <meta property="og:url" content="https://hime-cat.github.io/mitsuba-memo/" />
+    <meta property="og:image" content="https://hime-cat.github.io/mitsuba-memo/images/ogp.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="みつばメモ｜3つ選んで、ひとつだけ。" />
+    <meta name="twitter:description" content="今見るものを3つまでにしぼって、ひとつずつ進むための小さなタスク補助メモです。" />
+    <meta name="twitter:image" content="https://hime-cat.github.io/mitsuba-memo/images/ogp.png" />
+    <link rel="icon" type="image/png" href="images/fabicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Yomogi&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet" />
@@ -16,9 +30,7 @@
         <header class="app-header">
             <button class="brand-row brand-button" id="brandHomeBtn" type="button" aria-label="タスク選択モードに戻る">
                 <div class="brand-mark" aria-hidden="true">
-                    <span></span>
-                    <span></span>
-                    <span></span>
+                    <img src="images/mitsuba-memo-icon.png" alt="" />
                 </div>
                 <div>
                     <h1 class="title">みつばメモ</h1>
@@ -27,8 +39,8 @@
             </button>
 
             <nav class="tabs" aria-label="画面切り替え" role="tablist">
-                <button class="tab-btn is-active" id="useTab" type="button" role="tab" data-tab="use" aria-selected="true" aria-controls="usePanel">使う</button>
-                <button class="tab-btn" id="aboutTab" type="button" role="tab" data-tab="about" aria-selected="false" aria-controls="aboutPanel">このアプリ</button>
+                <button class="tab-btn tab-use is-active" id="useTab" type="button" role="tab" data-tab="use" data-label="使う" aria-label="使う" aria-selected="true" aria-controls="usePanel"></button>
+                <button class="tab-btn tab-about" id="aboutTab" type="button" role="tab" data-tab="about" data-label="このアプリ" aria-label="このアプリ" aria-selected="false" aria-controls="aboutPanel"></button>
             </nav>
         </header>
 
@@ -82,18 +94,19 @@
                             <section class="card input-guide-card">
                                 <h2>つかいかた</h2>
                                 <ol class="calm-list">
-                                    <li>今日気になることを、3つまで置く</li>
-                                    <li>今やるものを1つだけ選ぶ</li>
-                                    <li>大きければ、小さな一歩に分ける</li>
+                                    <li>進めたいことを、3つまで書く</li>
+                                    <li>今やるものを1つ選び「これを進める」を押す</li>
+                                    <li>動きやすいように、最初の一歩を決める</li>
+                                    <li>一歩が終わったら、次の一歩を足す</li>
+                                    <li>終わったら「できた！」で、おしまい！</li>
                                 </ol>
                             </section>
 
                             <section class="card input-hint-card">
                                 <h2>ヒント</h2>
                                 <ul class="calm-list">
-                                    <li>迷う日は、いちばん目につくものから</li>
-                                    <li>重い日は、「開く」「見る」だけでも大丈夫</li>
-                                    <li>今やらないことは、下の「後でやること置き場」へ</li>
+                                    <li>小さな一歩に分けにくい時は、AIに考えてもらえます</li>
+                                    <li>今やらないことは、「後でやること置き場」へ避難できます</li>
                                 </ul>
                             </section>
                         </div>
@@ -179,19 +192,14 @@
                                                         <span class="helper-step-label">2</span>
                                                         <h5>できそうな1つを戻す</h5>
                                                     </div>
-                                                    <p>ChatGPTやClaudeに貼って、できそうなものを1つだけ上の欄に戻してください。</p>
+                                                    <p>ChatGPTに貼って、できそうなものを1つだけ上の欄に戻してください。</p>
                                                     <div class="answer-example" aria-label="回答の参考">
                                                         <span>回答の参考</span>
                                                         <code>資料を開く<br>見出しだけ見る<br>1行だけメモする</code>
                                                     </div>
                                                     <p class="helper-mini-note">しっくりこない時は、AIに「小さく」「大きく」「別」と送れます。</p>
                                                     <div class="helper-link-row">
-                                                        <a class="helper-link helper-icon-link chatgpt-link" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer" aria-label="ChatGPTを開く" title="ChatGPTを開く">
-                                                            <span aria-hidden="true">GPT</span>
-                                                        </a>
-                                                        <a class="helper-link helper-icon-link claude-link" href="https://claude.ai/" target="_blank" rel="noopener noreferrer" aria-label="Claudeを開く" title="Claudeを開く">
-                                                            <span aria-hidden="true">C</span>
-                                                        </a>
+                                                        <a class="helper-link helper-copy-btn chatgpt-link" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">ChatGPTを開く</a>
                                                     </div>
                                                 </div>
                                             </div>
@@ -211,12 +219,12 @@
                     <div class="about-copy">
                         <h2>みつばメモについて</h2>
                         <p>
-                            みつばメモは、たくさんのタスクに囲まれすぎないように、今日見るものを3つまでにしぼるための小さなメモです。
+                            みつばメモは、たくさんのタスクに囲まれすぎないように、今見るものを3つまでにしぼるための小さなメモです。
                         </p>
                         <div class="about-block">
                             <h3>作った理由</h3>
                             <p>
-                                ADHDや気分の波があると、やることを選ぶだけで疲れることがあります。
+                                ADHD（注意欠如・多動症）などの特性や気分の波があると、やることを選ぶだけで疲れることがあります。
                             </p>
                             <p>
                                 みつばメモは、タスクを増やすためではなく、見るものを減らすために作りました。
@@ -227,9 +235,11 @@
                             <h3>使い方</h3>
                             <ol class="about-steps">
                                 <li>まず「今日の候補」に、気になることを1つ入れます。</li>
-                                <li>候補が増えすぎないように、今日見るものは3つまでにします。</li>
-                                <li>その中から「これを進める」を押して、「今はこれだけ」を1つ選びます。</li>
-                                <li>動き出しやすいように、「小さな一歩」に分けます。</li>
+                                <li>候補が増えすぎないように、今見るものは3つまでにします。</li>
+                                <li>その中から1つ選び「これを進める」を押しましょう。</li>
+                                <li>動き出しやすいように、「最初の一歩」を決めてみましょう。</li>
+                                <li>最初の一歩ができたら次の一歩も決めてみましょう。</li>
+                                <li>いまやることが終わったら「できた！」でおしまい！</li>
                             </ol>
                         </div>
                         <div class="about-block">
@@ -239,7 +249,14 @@
                                 ここに置いたら、忘れても大丈夫です。
                             </p>
                             <p>
-                                完了できない日も、後でやること置き場や小さな一歩に戻れば、あとで再開しやすくなります。
+                                完了できない日も、「小さな一歩」に戻れば、あとで再開しやすくなります。
+                            </p>
+                        </div>
+                        <div class="about-block">
+                            <h3>保存について</h3>
+                            <p>
+                                入力した内容は、このブラウザに自動で保存されます。
+                                端末をまたいで使える保存機能も準備中です。
                             </p>
                         </div>
                         <div class="about-block">

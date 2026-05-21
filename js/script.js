@@ -60,8 +60,6 @@ let isAddStepOpen = false;
 let addStepTaskId = null;
 let selectedCandidateTaskId = null;
 let selectedParkingItemId = null;
-const aiHelperTouchedTaskIds = new Set();
-const allDoneAutoOpenedTaskIds = new Set();
 
 function createId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -429,6 +427,15 @@ function formatUpdatedAt(isoString) {
   return `${d.getFullYear()}/${month}/${day}`;
 }
 
+function formatItemTimestamp(item) {
+  const createdAt = item?.createdAt || "";
+  const updatedAt = item?.updatedAt || createdAt;
+  const label = updatedAt && updatedAt !== createdAt ? "更新" : "作成";
+  const text = formatUpdatedAt(updatedAt || createdAt);
+
+  return text ? `${label} ${text}` : label;
+}
+
 function escapeHtml(str) {
   return str
     .replaceAll("&", "&amp;")
@@ -642,11 +649,6 @@ function renderNextStep(task) {
 
   const canAddStep = Boolean(task) && hasSteps && !isAllDone;
 
-  if (task && isAllDone && aiHelperTouchedTaskIds.has(task.id) && !allDoneAutoOpenedTaskIds.has(task.id)) {
-    isAiHelperOpen = true;
-    allDoneAutoOpenedTaskIds.add(task.id);
-  }
-
   stepSectionTitle.textContent = hasSteps ? "一歩ずつ進める" : "最初の一歩を決める";
   stepSectionDesc.textContent = hasSteps
     ? "小さく分けたものを、上からひとつずつ進めましょう。"
@@ -668,7 +670,7 @@ function renderNextStep(task) {
   stepHelperPanel.hidden = canAddStep ? !isAddStepOpen : hasSteps && !isAllDone;
   importStepsBtn.textContent = hasSteps ? "一歩を追加" : "これから始める";
   bulkStepInput.placeholder = hasSteps
-    ? "足したい一歩を1行ずつ書きます（AIの回答を貼ってもOK）"
+    ? "例：メールを1通だけ開く"
     : "例：カーテンを開ける / メールを開く\n迷ったときは、AIに考えてもらうことができます。";
   bulkStepInput.classList.toggle("is-first-step-input", !hasSteps);
   aiHelperToggleBtn.setAttribute("aria-expanded", String(isAiHelperOpen));
@@ -709,13 +711,24 @@ function renderStepList(task, currentStepId) {
       <div class="step-content">
         ${step.done
           ? `<span class="step-text">${escapeHtml(step.text)}</span>`
-          : `<input class="step-edit-input" type="text" value="${escapeHtml(step.text)}" data-step-id="${escapeHtml(step.id)}" data-original-text="${escapeHtml(step.text)}" aria-label="小さな一歩を編集">`}
+          : `<textarea class="step-edit-input" rows="1" data-step-id="${escapeHtml(step.id)}" data-original-text="${escapeHtml(step.text)}" aria-label="小さな一歩を編集">${escapeHtml(step.text)}</textarea>`}
       </div>
       ${isCurrentStep ? `<button class="btn-done small step-done-btn" data-step-action="done" data-step-id="${escapeHtml(step.id)}" type="button">できた</button>` : ""}
     `;
 
     stepList.appendChild(item);
   });
+
+  resizeStepInputs();
+}
+
+function resizeStepInput(input) {
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight}px`;
+}
+
+function resizeStepInputs() {
+  stepList.querySelectorAll(".step-edit-input").forEach(resizeStepInput);
 }
 
 function updateStepText(stepId, text) {
@@ -788,23 +801,12 @@ function returnToTaskSelection() {
 
 function toggleAddStep() {
   isAddStepOpen = !isAddStepOpen;
-  const currentTask = getCurrentTask();
-
-  if (isAddStepOpen && currentTask) {
-    isAiHelperOpen = true;
-    aiHelperTouchedTaskIds.add(currentTask.id);
-  }
 
   renderSupportPanel();
 }
 
 function toggleAiHelper() {
   isAiHelperOpen = !isAiHelperOpen;
-  const currentTask = getCurrentTask();
-
-  if (isAiHelperOpen && currentTask) {
-    aiHelperTouchedTaskIds.add(currentTask.id);
-  }
 
   renderSupportPanel();
 }
@@ -834,12 +836,16 @@ function importBulkSteps() {
     ? hadSteps ? "一歩を追加しました" : "これから始める一歩を置きました"
     : `${lines.length}件に分けました`;
   isAiHelperOpen = false;
-  isAddStepOpen = true;
+  isAddStepOpen = hadSteps;
 
   saveState();
   renderAll();
   requestAnimationFrame(() => {
-    bulkStepInput.focus();
+    stepList.scrollTop = stepList.scrollHeight;
+
+    if (isAddStepOpen) {
+      bulkStepInput.focus();
+    }
   });
 }
 
@@ -972,9 +978,11 @@ function moveTaskToParking(taskId) {
   if (!task) return;
 
   const now = new Date().toISOString();
+  const parkedTask = normalizeTask(task);
 
   state.parking.unshift({
-    ...normalizeTask(task),
+    ...parkedTask,
+    updatedAt: now,
     parkedAt: now
   });
 
@@ -1050,9 +1058,9 @@ function renderCandidatePicker(container) {
   const actions = document.createElement("div");
   actions.className = "candidate-picker-actions";
   actions.innerHTML = `
-    <button class="btn-primary small candidate-start-btn" data-action="current" type="button">これを進める</button>
     <button class="candidate-text-action candidate-parking-action" data-action="parking" type="button">🪴後でやること置き場へ</button>
     <button class="candidate-text-action candidate-delete-action" data-action="delete" type="button">候補から消す</button>
+    <button class="btn-primary small candidate-start-btn" data-action="current" type="button">これを進める</button>
   `;
 
   actions.querySelector('[data-action="current"]').addEventListener("click", () => {
@@ -1252,7 +1260,7 @@ function renderParking() {
       <span class="parking-choice-mark" aria-hidden="true"></span>
       <span class="parking-choice-body">
         <span class="item-text">${escapeHtml(item.text)}</span>
-        <span class="item-updated">作成 ${formatUpdatedAt(item.parkedAt || item.createdAt)}</span>
+        <span class="item-updated">${formatItemTimestamp(item)}</span>
       </span>
     `;
 
@@ -1337,6 +1345,7 @@ stepList.addEventListener("input", (event) => {
   const input = event.target.closest(".step-edit-input");
   if (!input) return;
 
+  resizeStepInput(input);
   updateStepText(input.dataset.stepId, input.value);
 });
 stepList.addEventListener("change", (event) => {
@@ -1347,12 +1356,14 @@ stepList.addEventListener("change", (event) => {
 
   if (!text) {
     input.value = input.dataset.originalText || "";
+    resizeStepInput(input);
     updateStepText(input.dataset.stepId, input.value);
     return;
   }
 
   input.value = text;
   input.dataset.originalText = text;
+  resizeStepInput(input);
   updateStepText(input.dataset.stepId, text);
 });
 stepList.addEventListener("click", (event) => {
@@ -1374,6 +1385,7 @@ stepList.addEventListener("keydown", (event) => {
     event.preventDefault();
     const originalText = event.target.dataset.originalText || "";
     event.target.value = originalText;
+    resizeStepInput(event.target);
     updateStepText(event.target.dataset.stepId, originalText);
     event.target.blur();
   }
