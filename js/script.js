@@ -1,14 +1,18 @@
 const STORAGE_KEY = "adhd_support_app_v3";
 const COMPLETED_LIMIT = 5;
+const PARKING_LIMIT = 40;
 const EMPTY_CURRENT_TASK_TEXT = "まずは今日の候補を1つ入れてみましょう";
 const SELECT_CURRENT_TASK_TEXT = "候補から「これを進める」を選びましょう";
 const DEFAULT_NEXT_STEP_COUNT_TEXT = "一歩ずつ進めましょう";
+const SUPABASE_URL = "https://wbfsycdkhcngchlqovis.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_Oa61IniZw8mp-NTlJkerug_HTlGTboo";
 
 const state = {
   tasks: [],
   completedTasks: [],
   currentTaskId: null,
   parking: [],
+  deletedItems: [],
   showParking: false
 };
 
@@ -50,6 +54,15 @@ const importStepsBtn = document.getElementById("importStepsBtn");
 
 const parkingToggleBtn = document.getElementById("parkingToggleBtn");
 const parkingList = document.getElementById("parkingList");
+const syncStatus = document.getElementById("syncStatus");
+const syncCardTitle = document.getElementById("syncCardTitle");
+const syncCardDesc = document.getElementById("syncCardDesc");
+const syncEmailForm = document.getElementById("syncEmailForm");
+const syncEmailInput = document.getElementById("syncEmailInput");
+const syncCodeForm = document.getElementById("syncCodeForm");
+const syncCodeInput = document.getElementById("syncCodeInput");
+const sendSyncCodeBtn = document.getElementById("sendSyncCodeBtn");
+const verifySyncCodeBtn = document.getElementById("verifySyncCodeBtn");
 
 let hasShownSaveError = false;
 let isTaskInputComposing = false;
@@ -60,6 +73,10 @@ let isAddStepOpen = false;
 let addStepTaskId = null;
 let selectedCandidateTaskId = null;
 let selectedParkingItemId = null;
+let supabaseClient = null;
+let isCloudSyncReady = false;
+let isCloudSyncInProgress = false;
+let cloudSyncTimerId = null;
 
 function createId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -69,9 +86,14 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function saveState() {
+function saveState({ skipCloudSync = false } = {}) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+    if (!skipCloudSync) {
+      scheduleAutoCloudSync();
+    }
+
     return true;
   } catch (error) {
     console.error("保存に失敗しました:", error);
@@ -361,6 +383,42 @@ function normalizeParkingItem(item) {
   };
 }
 
+function normalizeDeletedItem(item) {
+  const source = item || {};
+  const now = new Date().toISOString();
+  const id = typeof source.id === "string" ? source.id : "";
+
+  return {
+    id,
+    deletedAt: normalizeCloudDate(source.deletedAt, now)
+  };
+}
+
+function rememberDeletedItem(id, deletedAt = new Date().toISOString()) {
+  if (!id) return;
+
+  state.deletedItems = Array.isArray(state.deletedItems) ? state.deletedItems.filter(item => item.id !== id) : [];
+  state.deletedItems.unshift({
+    id,
+    deletedAt: normalizeCloudDate(deletedAt)
+  });
+  state.deletedItems = state.deletedItems.slice(0, 120);
+}
+
+function trimParkingToLimit() {
+  if (state.parking.length <= PARKING_LIMIT) return;
+
+  const sortedParking = [...state.parking].sort(compareItemsByUpdatedAtDesc);
+  const keepIds = new Set(sortedParking.slice(0, PARKING_LIMIT).map(item => item.id));
+  const overflow = state.parking.filter(item => !keepIds.has(item.id));
+
+  overflow.forEach(item => {
+    rememberDeletedItem(item.id, new Date().toISOString());
+  });
+
+  state.parking = sortedParking.slice(0, PARKING_LIMIT);
+}
+
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -383,6 +441,10 @@ function loadState() {
       : [];
     state.currentTaskId = source.currentTaskId ?? null;
     state.parking = Array.isArray(source.parking) ? source.parking.map(normalizeParkingItem) : [];
+    state.deletedItems = Array.isArray(source.deletedItems)
+      ? source.deletedItems.map(normalizeDeletedItem).filter(item => item.id).slice(0, 120)
+      : [];
+    trimParkingToLimit();
     state.showParking = Boolean(source.showParking);
 
     if (state.currentTaskId && !state.tasks.some(task => task.id === state.currentTaskId)) {
@@ -863,6 +925,527 @@ async function copyStepPrompt() {
   }
 }
 
+function initializeSupabaseClient() {
+  if (!window.supabase?.createClient) {
+    setSyncStatus("Supabaseの読み込みができませんでした。このブラウザには今まで通り保存されます。", "error");
+    return null;
+  }
+
+  return window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+}
+
+function setSyncStatus(message, type = "") {
+  if (!syncStatus) return;
+
+  syncStatus.textContent = message;
+  syncStatus.classList.toggle("is-error", type === "error");
+  syncStatus.classList.toggle("is-success", type === "success");
+}
+
+function setSyncBusy(isBusy) {
+  if (sendSyncCodeBtn) {
+    sendSyncCodeBtn.disabled = isBusy;
+  }
+
+  if (verifySyncCodeBtn) {
+    verifySyncCodeBtn.disabled = isBusy;
+  }
+
+}
+
+function updateSyncContent(isConnected) {
+  if (syncCardTitle) {
+    syncCardTitle.textContent = isConnected ? "みつばメモを見返せる場所が増えました" : "別の端末でも見られるようにする";
+  }
+
+  if (syncCardDesc) {
+    syncCardDesc.textContent = isConnected
+      ? "このブラウザにもクラウドにも、やることが残ります。同じメールアドレスを使えば、別のブラウザや端末でも同じやることを見られます。"
+      : "メールアドレスに届くコードで確認すると、このブラウザのデータをクラウドにも残せます。同じメールアドレスを使えば、別のブラウザや端末でも同じやることを見られます。";
+  }
+
+  if (syncEmailForm) {
+    syncEmailForm.hidden = isConnected;
+  }
+
+  if (syncCodeForm && isConnected) {
+    syncCodeForm.hidden = true;
+  }
+
+}
+
+function normalizeCloudDate(value, fallback = new Date().toISOString()) {
+  if (typeof value !== "string") return fallback;
+
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? fallback : new Date(time).toISOString();
+}
+
+function getItemTime(item, keys = ["updatedAt", "updated_at", "completedAt", "completed_at", "createdAt", "created_at"]) {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (typeof value !== "string") continue;
+
+    const time = Date.parse(value);
+    if (!Number.isNaN(time)) return time;
+  }
+
+  return 0;
+}
+
+function compareItemsByUpdatedAtDesc(a, b) {
+  return getItemTime(b) - getItemTime(a);
+}
+
+function compareCompletedItemsDesc(a, b) {
+  return getItemTime(b, ["completedAt", "completed_at", "updatedAt", "updated_at", "createdAt", "created_at"])
+    - getItemTime(a, ["completedAt", "completed_at", "updatedAt", "updated_at", "createdAt", "created_at"]);
+}
+
+function convertCloudRowToLocalItem(row) {
+  const payload = row?.payload && typeof row.payload === "object" ? row.payload : {};
+  const steps = Array.isArray(payload.steps)
+    ? payload.steps.map(normalizeStep).filter(step => step.text)
+    : [];
+  const createdAt = normalizeCloudDate(row?.created_at);
+  const updatedAt = normalizeCloudDate(row?.updated_at || row?.created_at, createdAt);
+
+  const item = {
+    id: String(row?.id || createId()),
+    text: String(row?.text || ""),
+    createdAt,
+    updatedAt,
+    nextStep: "",
+    stepCount: steps.filter(step => step.done).length,
+    steps,
+    interruptionNote: "",
+    interruptedAt: null,
+    progressLogs: []
+  };
+
+  syncCurrentStepText(item);
+
+  if (row?.bucket === "parking") {
+    return {
+      ...item,
+      parkedAt: normalizeCloudDate(row?.parked_at, updatedAt)
+    };
+  }
+
+  if (row?.bucket === "completed") {
+    return {
+      ...item,
+      completedAt: normalizeCloudDate(row?.completed_at, updatedAt)
+    };
+  }
+
+  return item;
+}
+
+function buildCloudPayload(task) {
+  const steps = Array.isArray(task.steps) ? task.steps.map(normalizeStep).filter(step => step.text) : [];
+
+  return {
+    steps: steps.map(step => ({
+      id: step.id,
+      text: step.text,
+      done: Boolean(step.done),
+      createdAt: normalizeCloudDate(step.createdAt),
+      updatedAt: normalizeCloudDate(step.updatedAt || step.createdAt)
+    }))
+  };
+}
+
+function buildCloudItem(task, bucket, userId) {
+  const now = new Date().toISOString();
+  const normalized = bucket === "parking"
+    ? normalizeParkingItem(task)
+    : {
+        ...normalizeTask(task),
+        completedAt: typeof task?.completedAt === "string" ? task.completedAt : null
+      };
+  const createdAt = normalizeCloudDate(normalized.createdAt, now);
+  const updatedAt = normalizeCloudDate(normalized.updatedAt || normalized.createdAt, createdAt);
+
+  return {
+    id: normalized.id,
+    user_id: userId,
+    bucket,
+    text: normalized.text,
+    payload: buildCloudPayload(normalized),
+    created_at: createdAt,
+    updated_at: updatedAt,
+    deleted_at: null,
+    parked_at: bucket === "parking" ? normalizeCloudDate(normalized.parkedAt, updatedAt) : null,
+    completed_at: bucket === "completed" ? normalizeCloudDate(normalized.completedAt, updatedAt) : null
+  };
+}
+
+function buildCloudItems(userId) {
+  const itemsById = new Map();
+
+  state.tasks.forEach(task => {
+    const item = buildCloudItem(task, "task", userId);
+    if (item.text) itemsById.set(item.id, item);
+  });
+
+  state.parking.forEach(task => {
+    const item = buildCloudItem(task, "parking", userId);
+    if (item.text) itemsById.set(item.id, item);
+  });
+
+  state.completedTasks.forEach(task => {
+    const item = buildCloudItem(task, "completed", userId);
+    if (item.text) itemsById.set(item.id, item);
+  });
+
+  return Array.from(itemsById.values());
+}
+
+function getLocalItemsForMerge() {
+  return [
+    ...state.tasks.map(item => ({ bucket: "task", item: normalizeTask(item) })),
+    ...state.parking.map(item => ({ bucket: "parking", item: normalizeParkingItem(item) })),
+    ...state.completedTasks.map(item => ({
+      bucket: "completed",
+      item: {
+        ...normalizeTask(item),
+        completedAt: typeof item?.completedAt === "string" ? item.completedAt : item?.updatedAt
+      }
+    }))
+  ];
+}
+
+function getDeletedMap(cloudRows) {
+  const deletedMap = new Map();
+
+  if (Array.isArray(state.deletedItems)) {
+    state.deletedItems.forEach(item => {
+      if (!item.id) return;
+      deletedMap.set(item.id, normalizeCloudDate(item.deletedAt));
+    });
+  }
+
+  cloudRows.forEach(row => {
+    if (!row?.id || !row.deleted_at) return;
+    const deletedAt = normalizeCloudDate(row.deleted_at);
+    const current = deletedMap.get(row.id);
+
+    if (!current || Date.parse(deletedAt) > Date.parse(current)) {
+      deletedMap.set(row.id, deletedAt);
+    }
+  });
+
+  return deletedMap;
+}
+
+function chooseNewerMergeEntry(current, next) {
+  if (!current) return next;
+  return getItemTime(next.item) >= getItemTime(current.item) ? next : current;
+}
+
+function mergeLocalAndCloudData(cloudRows, cloudUserState = null) {
+  const now = new Date().toISOString();
+  const deletedMap = getDeletedMap(cloudRows);
+  const activeById = new Map();
+
+  getLocalItemsForMerge().forEach(entry => {
+    if (!entry.item.id || !entry.item.text || deletedMap.has(entry.item.id)) return;
+    activeById.set(entry.item.id, chooseNewerMergeEntry(activeById.get(entry.item.id), entry));
+  });
+
+  cloudRows.forEach(row => {
+    if (!row?.id || row.deleted_at || deletedMap.has(row.id)) return;
+    const item = convertCloudRowToLocalItem(row);
+    if (!item.text) return;
+    activeById.set(item.id, chooseNewerMergeEntry(activeById.get(item.id), {
+      bucket: row.bucket,
+      item
+    }));
+  });
+
+  const taskItems = [];
+  const parkingItems = [];
+  const completedItems = [];
+
+  activeById.forEach(entry => {
+    if (entry.bucket === "completed") {
+      completedItems.push({
+        ...normalizeTask(entry.item),
+        completedAt: typeof entry.item.completedAt === "string" ? entry.item.completedAt : entry.item.updatedAt
+      });
+      return;
+    }
+
+    if (entry.bucket === "parking") {
+      parkingItems.push(normalizeParkingItem(entry.item));
+      return;
+    }
+
+    taskItems.push(normalizeTask(entry.item));
+  });
+
+  taskItems.sort(compareItemsByUpdatedAtDesc);
+  const nextTasks = taskItems.slice(0, 3);
+  const overflowTasks = taskItems.slice(3).map(item => ({
+    ...item,
+    updatedAt: now,
+    parkedAt: now
+  }));
+
+  const nextParking = [...parkingItems, ...overflowTasks]
+    .sort(compareItemsByUpdatedAtDesc)
+    .slice(0, PARKING_LIMIT)
+    .map(normalizeParkingItem);
+  const parkingKeepIds = new Set(nextParking.map(item => item.id));
+
+  [...parkingItems, ...overflowTasks].forEach(item => {
+    if (!parkingKeepIds.has(item.id)) {
+      deletedMap.set(item.id, now);
+    }
+  });
+
+  const nextCompleted = completedItems
+    .sort(compareCompletedItemsDesc)
+    .slice(0, COMPLETED_LIMIT)
+    .map(item => ({
+      ...normalizeTask(item),
+      completedAt: typeof item.completedAt === "string" ? item.completedAt : item.updatedAt
+    }));
+  const completedKeepIds = new Set(nextCompleted.map(item => item.id));
+
+  completedItems.forEach(item => {
+    if (!completedKeepIds.has(item.id)) {
+      deletedMap.set(item.id, now);
+    }
+  });
+
+  const localCurrentTaskId = state.currentTaskId;
+  const localCurrentIsValid = localCurrentTaskId && nextTasks.some(task => task.id === localCurrentTaskId);
+  const cloudCurrentTaskId = cloudUserState?.current_task_id;
+  const cloudCurrentIsValid = cloudCurrentTaskId && nextTasks.some(task => task.id === cloudCurrentTaskId);
+
+  state.tasks = nextTasks;
+  state.parking = nextParking;
+  state.completedTasks = nextCompleted;
+  state.currentTaskId = localCurrentIsValid ? localCurrentTaskId : cloudCurrentIsValid ? cloudCurrentTaskId : null;
+  state.deletedItems = Array.from(deletedMap.entries())
+    .map(([id, deletedAt]) => ({ id, deletedAt }))
+    .sort((a, b) => getItemTime(b, ["deletedAt"]) - getItemTime(a, ["deletedAt"]))
+    .slice(0, 120);
+
+  if (selectedCandidateTaskId && !state.tasks.some(task => task.id === selectedCandidateTaskId)) {
+    selectedCandidateTaskId = null;
+  }
+
+  if (selectedParkingItemId && !state.parking.some(item => item.id === selectedParkingItemId)) {
+    selectedParkingItemId = null;
+  }
+}
+
+async function pushLocalStateToCloud(user, successMessage) {
+  const now = new Date().toISOString();
+  const items = buildCloudItems(user.id);
+  const activeIds = items.map(item => item.id);
+
+  const statePayload = {
+    user_id: user.id,
+    current_task_id: state.currentTaskId && state.tasks.some(task => task.id === state.currentTaskId)
+      ? state.currentTaskId
+      : null,
+    updated_at: now,
+    schema_version: 1
+  };
+
+  const { error: stateError } = await supabaseClient
+    .from("mitsuba_user_state")
+    .upsert(statePayload, { onConflict: "user_id" });
+
+  if (stateError) {
+    console.error("ユーザー状態のクラウド保存に失敗しました:", stateError);
+    setSyncStatus(`クラウド保存に失敗しました。Supabase: ${stateError.message}`, "error");
+    return false;
+  }
+
+  if (items.length > 0) {
+    const { error: itemsError } = await supabaseClient
+      .from("mitsuba_items")
+      .upsert(items, { onConflict: "id" });
+
+    if (itemsError) {
+      console.error("やることのクラウド保存に失敗しました:", itemsError);
+      setSyncStatus(`クラウド保存に失敗しました。Supabase: ${itemsError.message}`, "error");
+      return false;
+    }
+  }
+
+  let staleQuery = supabaseClient
+    .from("mitsuba_items")
+    .update({ deleted_at: now, updated_at: now })
+    .eq("user_id", user.id)
+    .is("deleted_at", null);
+
+  if (activeIds.length > 0) {
+    staleQuery = staleQuery.not("id", "in", `(${activeIds.map(id => `"${String(id).replace(/"/g, '\\"')}"`).join(",")})`);
+  }
+
+  const { error: staleError } = await staleQuery;
+
+  if (staleError) {
+    console.error("古いクラウドデータの整理に失敗しました:", staleError);
+    setSyncStatus(`保存は途中までできましたが、古いデータの整理に失敗しました。Supabase: ${staleError.message}`, "error");
+    return false;
+  }
+
+  setSyncStatus(successMessage, "success");
+  return true;
+}
+
+async function getAuthenticatedSyncUser() {
+  if (!supabaseClient) {
+    setSyncStatus("Supabaseの準備ができていません。このブラウザには今まで通り保存されます。", "error");
+    return null;
+  }
+
+  const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+  const user = sessionData?.session?.user;
+
+  if (sessionError || !user) {
+    console.error("クラウド同期前の認証確認に失敗しました:", sessionError);
+    updateSyncContent(false);
+    setSyncStatus("確認状態を読み込めませんでした。もう一度メール確認をしてください。", "error");
+    return null;
+  }
+
+  return user;
+}
+
+function scheduleAutoCloudSync() {
+  if (!isCloudSyncReady || isCloudSyncInProgress || !supabaseClient) return;
+
+  if (cloudSyncTimerId) {
+    clearTimeout(cloudSyncTimerId);
+  }
+
+  cloudSyncTimerId = window.setTimeout(autoPushLocalStateToCloud, 1000);
+}
+
+async function autoPushLocalStateToCloud() {
+  if (!isCloudSyncReady || isCloudSyncInProgress || !supabaseClient) return false;
+
+  cloudSyncTimerId = null;
+  isCloudSyncInProgress = true;
+  setSyncStatus("クラウドへ保存しています...");
+
+  const user = await getAuthenticatedSyncUser();
+
+  if (!user) {
+    isCloudSyncReady = false;
+    isCloudSyncInProgress = false;
+    return false;
+  }
+
+  const ok = await pushLocalStateToCloud(user, "クラウドに保存しました。");
+  isCloudSyncInProgress = false;
+  isCloudSyncReady = ok;
+  return ok;
+}
+
+async function syncLocalAndCloud() {
+  if (isCloudSyncInProgress) return false;
+
+  if (cloudSyncTimerId) {
+    clearTimeout(cloudSyncTimerId);
+    cloudSyncTimerId = null;
+  }
+
+  isCloudSyncInProgress = true;
+  isCloudSyncReady = false;
+  setSyncBusy(true);
+  setSyncStatus("このブラウザとクラウドのやることを合わせています...");
+
+  const user = await getAuthenticatedSyncUser();
+
+  if (!user) {
+    setSyncBusy(false);
+    isCloudSyncInProgress = false;
+    return false;
+  }
+
+  const { data: cloudRows, error: itemsError } = await supabaseClient
+    .from("mitsuba_items")
+    .select("*")
+    .eq("user_id", user.id);
+
+  if (itemsError) {
+    console.error("クラウドデータの読み込みに失敗しました:", itemsError);
+    setSyncBusy(false);
+    isCloudSyncInProgress = false;
+    setSyncStatus(`クラウドデータを読み込めませんでした。Supabase: ${itemsError.message}`, "error");
+    return false;
+  }
+
+  const { data: cloudUserState, error: userStateError } = await supabaseClient
+    .from("mitsuba_user_state")
+    .select("*")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (userStateError) {
+    console.error("クラウドの選択状態読み込みに失敗しました:", userStateError);
+    setSyncBusy(false);
+    isCloudSyncInProgress = false;
+    setSyncStatus(`クラウドデータを読み込めませんでした。Supabase: ${userStateError.message}`, "error");
+    return false;
+  }
+
+  mergeLocalAndCloudData(Array.isArray(cloudRows) ? cloudRows : [], cloudUserState);
+  saveState({ skipCloudSync: true });
+  renderAll();
+
+  const ok = await pushLocalStateToCloud(user, "ほかの端末でも見られるようにしました。");
+  setSyncBusy(false);
+  isCloudSyncInProgress = false;
+  isCloudSyncReady = ok;
+  return ok;
+}
+
+function getSyncErrorMessage(error, fallback) {
+  const message = error?.message || "";
+  const lowerMessage = message.toLowerCase();
+
+  if (lowerMessage.includes("rate") || lowerMessage.includes("security")) {
+    return "短い時間に何度か送っています。少し時間を置いてから、もう一度試してください。";
+  }
+
+  if (lowerMessage.includes("email")) {
+    return `確認コードを送れませんでした。Supabase: ${message}`;
+  }
+
+  return message ? `${fallback} Supabase: ${message}` : fallback;
+}
+
+async function refreshSyncSession() {
+  if (!supabaseClient) return;
+
+  const { data, error } = await supabaseClient.auth.getSession();
+
+  if (error) {
+    setSyncStatus("確認状態を読み込めませんでした。このブラウザのデータは残っています。", "error");
+    return;
+  }
+
+  const email = data.session?.user?.email;
+
+  if (email) {
+    updateSyncContent(true);
+    setSyncStatus(`${email} で確認済みです。クラウドと合わせています...`, "success");
+    await syncLocalAndCloud();
+  } else {
+    updateSyncContent(false);
+  }
+}
+
 function focusCurrentTaskBox() {
   if (!currentBox) return;
 
@@ -924,6 +1507,7 @@ function addTask() {
 }
 
 function deleteTask(taskId) {
+  rememberDeletedItem(taskId);
   state.tasks = state.tasks.filter(task => task.id !== taskId);
 
   if (state.currentTaskId === taskId) {
@@ -1114,6 +1698,7 @@ function shouldSubmitBulkStepInput(event) {
 }
 
 function deleteParkingMemo(id) {
+  rememberDeletedItem(id);
   state.parking = state.parking.filter(item => item.id !== id);
 
   if (selectedParkingItemId === id) {
@@ -1171,6 +1756,7 @@ function addParkingMemo(text) {
     parkedAt: now
   });
 
+  trimParkingToLimit();
   state.showParking = true;
   selectedParkingItemId = id;
   saveState();
@@ -1305,6 +1891,99 @@ function renderAll() {
   renderParking();
 }
 
+async function sendSyncCode(event) {
+  event.preventDefault();
+
+  if (!supabaseClient) {
+    setSyncStatus("Supabaseの準備ができていません。このブラウザには今まで通り保存されます。", "error");
+    return;
+  }
+
+  const email = syncEmailInput.value.trim();
+
+  if (!email) {
+    setSyncStatus("メールアドレスを入力してください。", "error");
+    return;
+  }
+
+  setSyncBusy(true);
+  setSyncStatus("確認コードを送っています...");
+
+  const { error } = await supabaseClient.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: true,
+      emailRedirectTo: window.location.href
+    }
+  });
+
+  setSyncBusy(false);
+
+  if (error) {
+    console.error("確認コードの送信に失敗しました:", error);
+    setSyncStatus(getSyncErrorMessage(error, "確認コードを送れませんでした。メールアドレスを確認して、もう一度試してください。"), "error");
+    return;
+  }
+
+  syncCodeForm.hidden = false;
+  setSyncStatus("確認コードを送りました。メールに届いたコードを下に入れてください。");
+
+  requestAnimationFrame(() => {
+    syncCodeInput.focus();
+  });
+}
+
+async function verifySyncCode(event) {
+  event.preventDefault();
+
+  if (!supabaseClient) {
+    setSyncStatus("Supabaseの準備ができていません。このブラウザには今まで通り保存されます。", "error");
+    return;
+  }
+
+  const email = syncEmailInput.value.trim();
+  const token = syncCodeInput.value.replace(/\s+/g, "");
+
+  if (!email || !token) {
+    setSyncStatus("メールアドレスとコードを入力してください。", "error");
+    return;
+  }
+
+  setSyncBusy(true);
+  setSyncStatus("コードを確認しています...");
+
+  const { data, error } = await supabaseClient.auth.verifyOtp({
+    email,
+    token,
+    type: "email"
+  });
+
+  setSyncBusy(false);
+
+  if (error || !data.session) {
+    console.error("確認コードの検証に失敗しました:", error);
+    setSyncStatus("コードを確認できませんでした。新しいコードを送るか、入力内容を確認してください。", "error");
+    return;
+  }
+
+  syncCodeForm.hidden = true;
+  syncCodeInput.value = "";
+  updateSyncContent(true);
+  setSyncStatus("確認できました。クラウドと合わせています...", "success");
+  await syncLocalAndCloud();
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .catch(error => {
+        console.warn("Service Workerの登録に失敗しました:", error);
+      });
+  });
+}
+
 tabButtons.forEach(button => {
   button.addEventListener("click", () => {
     setActiveTab(button.dataset.tab);
@@ -1324,6 +2003,8 @@ addStepToggleBtn.addEventListener("click", toggleAddStep);
 aiHelperToggleBtn.addEventListener("click", toggleAiHelper);
 copyStepPromptBtn.addEventListener("click", copyStepPrompt);
 importStepsBtn.addEventListener("click", importBulkSteps);
+syncEmailForm.addEventListener("submit", sendSyncCode);
+syncCodeForm.addEventListener("submit", verifySyncCode);
 
 bulkStepInput.addEventListener("compositionstart", () => {
   isBulkStepInputComposing = true;
@@ -1421,4 +2102,7 @@ taskInput.addEventListener("keydown", (event) => {
 
 setActiveTab("use");
 loadState();
+supabaseClient = initializeSupabaseClient();
+refreshSyncSession();
 renderAll();
+registerServiceWorker();

@@ -18,7 +18,14 @@
     <meta name="twitter:title" content="みつばメモ｜3つ選んで、ひとつだけ。" />
     <meta name="twitter:description" content="今見るものを3つまでにしぼって、ひとつずつ進むための小さなタスク補助メモです。" />
     <meta name="twitter:image" content="https://hime-cat.github.io/mitsuba-memo/images/ogp.png" />
+    <meta name="theme-color" content="#6f9d63" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="みつばメモ" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="icon" type="image/png" href="images/fabicon.png" />
+    <link rel="apple-touch-icon" href="images/apple-touch-icon-kuma.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Yomogi&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet" />
@@ -253,11 +260,28 @@
                             </p>
                         </div>
                         <div class="about-block">
-                            <h3>保存について</h3>
-                            <p>
-                                入力した内容は、このブラウザに自動で保存されます。
-                                端末をまたいで使える保存機能も準備中です。
-                            </p>
+                            <div class="sync-card" id="syncCard">
+                                <h4 id="syncCardTitle">別の端末でも見られるようにする</h4>
+                                <p class="sync-desc" id="syncCardDesc">
+                                    メールアドレスに届くコードで確認すると、このブラウザのデータをクラウドにも残せます。
+                                    同じメールアドレスを使えば、別のブラウザや端末でも同じやることを見られます。
+                                </p>
+                                <p class="sync-status" id="syncStatus" aria-live="polite">まだ確認していません。このブラウザのデータは今まで通り残ります。</p>
+                                <form class="sync-form" id="syncEmailForm">
+                                    <label for="syncEmailInput">メールアドレス</label>
+                                    <div class="sync-row">
+                                        <input id="syncEmailInput" type="email" autocomplete="email" placeholder="name@example.com" required>
+                                        <button class="btn-soft sync-btn" id="sendSyncCodeBtn" type="submit">メールにコードを送る</button>
+                                    </div>
+                                </form>
+                                <form class="sync-form" id="syncCodeForm" hidden>
+                                    <label for="syncCodeInput">メールに届いたコード</label>
+                                    <div class="sync-row">
+                                        <input id="syncCodeInput" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6桁のコード" required>
+                                        <button class="btn-primary sync-btn" id="verifySyncCodeBtn" type="submit">確認する</button>
+                                    </div>
+                                </form>
+                            </div>
                         </div>
                         <div class="about-block">
                             <h3>大切なこと</h3>
@@ -291,6 +315,7 @@
             <p>© 2026 みつばメモ by himecat</p>
         </footer>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="js/script.js"></script>
 </body>
 
