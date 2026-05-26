@@ -1783,7 +1783,7 @@ function renderParking() {
   parkingToggleBtn.innerHTML = `
     <span class="parking-toggle-main">
       <span class="accordion-label">🪴 後でやること置き場</span>
-      <span class="parking-count">${state.parking.length}件</span>
+      <span class="parking-count">${state.parking.length} / ${PARKING_LIMIT}件</span>
     </span>
     <span class="parking-action-text">
       <span>${state.showParking ? "閉じる" : "見る"}</span>
