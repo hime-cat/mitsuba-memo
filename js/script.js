@@ -1738,6 +1738,7 @@ function addParkingMemo(text) {
   const trimmedText = cleanStepLine(text);
 
   if (!trimmedText) return false;
+  if (state.parking.length >= PARKING_LIMIT) return false;
 
   const now = new Date().toISOString();
   const id = createId();
@@ -1797,34 +1798,40 @@ function renderParking() {
     return;
   }
 
-  const compose = document.createElement("div");
-  compose.className = "parking-compose-row";
-  compose.innerHTML = `
-    <input class="parking-compose-input" type="text" placeholder="例：あとで見る資料 / 返信するメール" maxlength="80">
-    <button class="parking-compose-btn" type="button">置く</button>
-  `;
+  const isFull = state.parking.length >= PARKING_LIMIT;
 
-  const input = compose.querySelector(".parking-compose-input");
-  const button = compose.querySelector(".parking-compose-btn");
-  const submitParkingMemo = () => {
-    if (addParkingMemo(input.value)) {
-      input.value = "";
-      requestAnimationFrame(() => {
-        const nextInput = parkingList.querySelector(".parking-compose-input");
-        nextInput?.focus();
-      });
-    }
-  };
+  if (isFull) {
+    parkingList.insertAdjacentHTML("beforeend", `<div class="empty parking-limit-message">後でやること置き場がいっぱいです。戻すか削除すると、また置けます。</div>`);
+  } else {
+    const compose = document.createElement("div");
+    compose.className = "parking-compose-row";
+    compose.innerHTML = `
+      <input class="parking-compose-input" type="text" placeholder="例：あとで見る資料 / 返信するメール" maxlength="80">
+      <button class="parking-compose-btn" type="button">置く</button>
+    `;
 
-  button.addEventListener("click", submitParkingMemo);
-  input.addEventListener("keydown", event => {
-    if (event.key !== "Enter" || isImeComposing(event)) return;
+    const input = compose.querySelector(".parking-compose-input");
+    const button = compose.querySelector(".parking-compose-btn");
+    const submitParkingMemo = () => {
+      if (addParkingMemo(input.value)) {
+        input.value = "";
+        requestAnimationFrame(() => {
+          const nextInput = parkingList.querySelector(".parking-compose-input");
+          nextInput?.focus();
+        });
+      }
+    };
 
-    event.preventDefault();
-    submitParkingMemo();
-  });
+    button.addEventListener("click", submitParkingMemo);
+    input.addEventListener("keydown", event => {
+      if (event.key !== "Enter" || isImeComposing(event)) return;
 
-  parkingList.appendChild(compose);
+      event.preventDefault();
+      submitParkingMemo();
+    });
+
+    parkingList.appendChild(compose);
+  }
 
   if (state.parking.length === 0) {
     selectedParkingItemId = null;
