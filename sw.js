@@ -1,4 +1,4 @@
-const CACHE_NAME = "mitsuba-memo-v1";
+const CACHE_NAME = "mitsuba-memo-v5";
 
 const APP_SHELL = [
   "./",
@@ -16,6 +16,8 @@ const APP_SHELL = [
   "./images/hokapan-tab.png",
   "./images/hokapan-smile-tab.png",
   "./images/input-section-bg.webp",
+  "./images/decor/clover.webp",
+  "./images/decor/leaf.webp",
   "./images/ogp.png"
 ];
 
